@@ -1,0 +1,23 @@
+.env
+backups/
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+dist/
+.DS_Store
+# NUNCA subir datos reales de pacientes (ni capturas/PDF de informes reales)
+datos_reales/
+
+# Entornos virtuales
+venv/
+env/
+__pycache__/
+
+# Variables de entorno y secretos
+.env
+backend/.env
+
+# Base de datos y logs locales
+*.sqlite3
+*.log
