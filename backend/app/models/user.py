@@ -4,6 +4,7 @@ from app.core.database import Base  # O la base declarativa que uses en tu proye
 
 class Rol(Base):
     __tablename__ = "roles"
+    __table_args__ = {"schema": "laboratorio"}
 
     id_rol = Column(SmallInteger, primary_key=True, index=True)
     nombre = Column(String(30), unique=True, nullable=False)
@@ -11,9 +12,10 @@ class Rol(Base):
 
 class Usuario(Base):
     __tablename__ = "usuarios"
+    __table_args__ = {"schema": "laboratorio"}
 
     id_usuario = Column(BigInteger, primary_key=True, index=True)
-    id_rol = Column(SmallInteger, ForeignKey("roles.id_rol"), nullable=False)
+    id_rol = Column(SmallInteger, ForeignKey("laboratorio.roles.id_rol"), nullable=False)
     usuario = Column(String, unique=True, nullable=False)
     ci = Column(String(30), unique=True, nullable=False)
     nombres = Column(String(100), nullable=False)

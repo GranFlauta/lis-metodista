@@ -1,13 +1,16 @@
 """
 Módulo de seguridad para el LIS Laboratorio Clínico (Fase 1).
-Implementa:
+Implementa estrictamente docs/DECISIONES.md y PROMPT_FASE_1.md §5:
 - Hashing y verificación de contraseñas con Argon2id mediante pwdlib.
-- Generación de contraseñas temporales seguras de exactamente 14 caracteres aleatorios.
-- Validación de política de contraseñas según docs/DECISIONES.md:
+- Generación de contraseñas temporales seguras de 14 caracteres aleatorios sin caracteres ambiguos (0 O 1 l I).
+- Validación de política de contraseñas:
   * Longitud entre 10 y 128 caracteres.
   * No contener nombre de usuario ni CI.
-  * Distinta de la actual (verificación directa o por hash).
-- Emisión y decodificación de JWT de acceso según configuración (config.access_token_minutes).
+  * No pertenecer a la lista cerrada de contraseñas prohibidas (§6.4).
+  * Distinta de la actual.
+- Emisión y decodificación de JWT de acceso según configuración y claims estándar:
+  sub, sid, rol, iat, exp, typ="access".
+- Reloj centralizado mediante app.core.clock.ahora().
 - Generación y hash SHA-256 de refresh tokens opacos para la tabla sesiones.
 """
 
@@ -18,13 +21,14 @@ import hmac
 import re
 import secrets
 import string
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any
 
 import jwt
 from pwdlib import PasswordHash
 from pwdlib.hashers.argon2 import Argon2Hasher
 
+from app.core.clock import ahora
 from app.core.config import settings
 
 # Algoritmo estándar para JWT simétrico
@@ -34,8 +38,19 @@ JWT_ALGORITHM = "HS256"
 MIN_PASSWORD_LENGTH = 10
 MAX_PASSWORD_LENGTH = 128
 
+# Lista cerrada de contraseñas prohibidas (PROMPT_FASE_1.md §6.4)
+CLAVES_PROHIBIDAS = frozenset({
+    "12345", "123456", "1234567", "12345678", "123456789", "1234567890",
+    "0123456789", "password", "contraseña", "contrasena", "qwerty", "qwertyuiop",
+    "abcdef", "abcd1234", "admin", "admin123", "administrador", "lis123",
+    "laboratorio", "urgenlab", "bioquimico",
+})
+
 # Instancia de hasher configurada explícitamente con Argon2id
 password_hash = PasswordHash((Argon2Hasher(),))
+
+# Hash ficticio constante para mitigar ataques de temporización (timing attack) en login (§6.2)
+DUMMY_ARGON2_HASH = "$argon2id$v=19$m=65536,t=3,p=4$ZHVtbXlfc2FsdF8yMDI2$k8Y1/a4F3/wYJ5lQoZl7uQ"
 
 
 # -----------------------------------------------------------------------------
@@ -94,6 +109,14 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 
+def verify_dummy_password(plain_password: str = "dummy_clinical_attempt") -> None:
+    """
+    Ejecuta una verificación contra un hash Argon2id precalculado para igualar
+    los tiempos de respuesta ante usuarios no existentes (§6.2).
+    """
+    verify_password(plain_password, DUMMY_ARGON2_HASH)
+
+
 # -----------------------------------------------------------------------------
 # 2. Generación de Contraseñas Temporales
 # -----------------------------------------------------------------------------
@@ -104,26 +127,24 @@ def generate_temporary_password(
     ci: str | None = None,
 ) -> str:
     """
-    Genera una contraseña temporal segura de exactamente `length` caracteres aleatorios
-    (por defecto 14), con entropía criptográfica garantizada usando el módulo `secrets`.
-
-    Garantiza la presencia de al menos una letra mayúscula, una minúscula, un dígito
-    y un símbolo especial seguro. Además asegura que no colisione con el usuario o CI si se proporcionan.
+    Genera una contraseña temporal segura de exactamente `length` caracteres aleatorios (por defecto 14).
+    PROMPT_FASE_1.md §5: alfabeto sin caracteres ambiguos (0 O 1 l I).
     """
     if length < 10:
         raise ValueError("La longitud de la contraseña no puede ser inferior a 10 caracteres.")
     if length > 128:
         raise ValueError("La longitud de la contraseña no puede exceder los 128 caracteres.")
 
-    lower = string.ascii_lowercase
-    upper = string.ascii_uppercase
-    digits = string.digits
+    # Alfabeto sin caracteres ambiguos (0, O, 1, l, I)
+    lower = "".join(c for c in string.ascii_lowercase if c not in "l")
+    upper = "".join(c for c in string.ascii_uppercase if c not in "OI")
+    digits = "".join(c for c in string.digits if c not in "01")
     symbols = "!@#$%*-_+?"
     all_chars = lower + upper + digits + symbols
 
     rng = secrets.SystemRandom()
 
-    for _ in range(10):
+    for _ in range(20):
         chars = [
             secrets.choice(lower),
             secrets.choice(upper),
@@ -159,6 +180,7 @@ def check_password_policy(
     """
     Evalúa si la nueva contraseña cumple con la política de seguridad establecida:
     - Longitud entre 10 y 128 caracteres.
+    - No pertenecer a la lista de contraseñas prohibidas (§6.4) ni contener patrones prohibidos >= 8 caracteres.
     - No contener el nombre de usuario (case-insensitive).
     - No contener el documento de identidad CI (case-insensitive ni alfanumérico).
     - Distinta de la actual (comparada contra texto plano o hash Argon2id).
@@ -178,7 +200,15 @@ def check_password_policy(
 
     password_lower = new_password.lower()
 
-    # 2. Regla: no contener el nombre de usuario
+    # 2. Regla: lista de contraseñas prohibidas (§6.4)
+    if password_lower in CLAVES_PROHIBIDAS:
+        return False, "La contraseña elegida es demasiado común y no está permitida."
+
+    for patron in CLAVES_PROHIBIDAS:
+        if len(patron) >= 8 and patron in password_lower:
+            return False, "La contraseña elegida contiene un término común no permitido."
+
+    # 3. Regla: no contener el nombre de usuario
     if username:
         user_clean = username.strip().lower()
         if len(user_clean) >= 3 and user_clean in password_lower:
@@ -189,23 +219,23 @@ def check_password_policy(
             if part in password_lower:
                 return False, "La contraseña no puede contener el nombre de usuario."
 
-    # 3. Regla: no contener el CI
+    # 4. Regla: no contener el CI
     if ci:
         ci_clean = ci.strip().lower()
         if len(ci_clean) >= 3 and ci_clean in password_lower:
             return False, "La contraseña no puede contener el documento de identidad (CI)."
 
-        # Verificar la secuencia solo de dígitos del CI (para cubrir extensiones como -LP o puntos)
+        # Verificar secuencia de dígitos del CI (para cubrir extensiones como -LP o puntos)
         ci_digits = "".join(ch for ch in ci_clean if ch.isdigit())
         if len(ci_digits) >= 4 and ci_digits in password_lower:
             return False, "La contraseña no puede contener el número de CI."
 
-        # Verificar la secuencia alfanumérica completa sin separadores
+        # Verificar secuencia alfanumérica completa sin separadores
         ci_alnum = "".join(ch for ch in ci_clean if ch.isalnum())
         if len(ci_alnum) >= 4 and ci_alnum in password_lower:
             return False, "La contraseña no puede contener el número de CI."
 
-    # 4. Regla: distinta de la actual
+    # 5. Regla: distinta de la actual
     if current_password is not None:
         if new_password == current_password:
             return False, "La nueva contraseña debe ser distinta de la contraseña actual."
@@ -252,18 +282,13 @@ def validate_password_policy(
 def create_access_token(
     data: dict[str, Any] | None = None,
     subject: str | int | None = None,
+    session_id: str | None = None,
+    role: str | None = None,
     expires_delta: timedelta | None = None,
 ) -> str:
     """
     Crea un token de acceso JWT codificado con el algoritmo HS256.
-
-    Parámetros:
-        data: Diccionario con claims adicionales (opcional).
-        subject: Identificador del sujeto ('sub' claim). Puede ser el ID de usuario o login.
-        expires_delta: Duración personalizada. Si no se especifica, toma `settings.access_token_minutes`.
-
-    Retorna:
-        Token JWT firmado en formato string.
+    Claims (§5): sub, sid, rol, iat, exp, typ="access".
     """
     to_encode: dict[str, Any] = {}
     if data:
@@ -272,7 +297,15 @@ def create_access_token(
     if subject is not None:
         to_encode["sub"] = str(subject)
 
-    now = datetime.now(timezone.utc)
+    if session_id is not None and "sid" not in to_encode:
+        to_encode["sid"] = str(session_id)
+
+    if role is not None and "rol" not in to_encode:
+        to_encode["rol"] = str(role)
+
+    to_encode["typ"] = "access"
+
+    now = ahora()
     if expires_delta is not None:
         expire = now + expires_delta
     else:
@@ -287,15 +320,7 @@ def create_access_token(
 def decode_access_token(token: str) -> dict[str, Any]:
     """
     Decodifica y valida un token de acceso JWT.
-
-    Verifica la firma con `settings.jwt_secret` y comprueba la expiración ('exp').
-
-    Retorna:
-        Diccionario con los claims del payload decodificado.
-
-    Lanza:
-        TokenExpiredError si el token ha expirado.
-        TokenInvalidError si el token no es válido, tiene firma incorrecta o está corrupto.
+    Verifica firma con settings.jwt_secret y comprueba expiración.
     """
     if not token:
         raise TokenInvalidError("El token no puede estar vacío.")
@@ -319,8 +344,7 @@ def decode_access_token(token: str) -> dict[str, Any]:
 
 def generate_opaque_token(nbytes: int = 32) -> str:
     """
-    Genera un token opaco aleatorio criptográficamente seguro, codificado en base64 URL-safe.
-    Con 32 bytes genera una cadena de 43 caracteres con 256 bits de entropía.
+    Genera un token opaco aleatorio criptográficamente seguro de 256 bits (32 bytes).
     """
     return secrets.token_urlsafe(nbytes)
 
@@ -328,7 +352,6 @@ def generate_opaque_token(nbytes: int = 32) -> str:
 def hash_token(token: str) -> str:
     """
     Genera el hash SHA-256 en formato hexadecimal de 64 caracteres de un token opaco.
-    Diseñado para almacenarse en la columna `sesiones.refresh_hash CHAR(64)`.
     """
     if not token:
         raise ValueError("El token no puede estar vacío.")
@@ -338,9 +361,6 @@ def hash_token(token: str) -> str:
 def generate_refresh_token(nbytes: int = 32) -> tuple[str, str]:
     """
     Genera un par (token_opaco, hash_sha256).
-
-    El token opaco se entrega al cliente (en cookie HttpOnly segura),
-    mientras que el hash se almacena en la base de datos (tabla sesiones).
     """
     raw_token = generate_opaque_token(nbytes)
     token_hash = hash_token(raw_token)
@@ -349,8 +369,7 @@ def generate_refresh_token(nbytes: int = 32) -> tuple[str, str]:
 
 def verify_refresh_token(raw_token: str, stored_hash: str) -> bool:
     """
-    Compara en tiempo constante un refresh token en texto plano con el hash almacenado,
-    previniendo ataques de temporización (timing attacks).
+    Compara en tiempo constante un refresh token en texto plano con el hash almacenado.
     """
     if not raw_token or not stored_hash:
         return False

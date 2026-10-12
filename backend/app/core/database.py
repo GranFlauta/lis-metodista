@@ -9,11 +9,16 @@ from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
 from app.core.config import settings
 
+connect_args = {}
+if "postgresql" in settings.database_url:
+    connect_args["options"] = "-csearch_path=laboratorio,public"
+
 # Engine configurado con pool_pre_ping para reconexiones transparentes
 engine = create_engine(
     settings.database_url,
     pool_pre_ping=True,
     echo=False,
+    connect_args=connect_args,
 )
 
 # Fábrica de sesiones

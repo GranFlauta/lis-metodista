@@ -1,0 +1,743 @@
+/**
+ * Estilos visuales del sistema LIS Laboratorio Clínico.
+ * PROMPT_FASE_1.md §9: CSS propio, accesible, alto contraste y foco visible.
+ */
+
+:root {
+  --primary: #0284c7;
+  --primary-hover: #0369a1;
+  --primary-focus: rgba(2, 132, 199, 0.35);
+  --bg-page: #f8fafc;
+  --bg-card: #ffffff;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --border-color: #cbd5e1;
+  --success: #15803d;
+  --success-bg: #f0fdf4;
+  --warning: #b45309;
+  --warning-bg: #fefce8;
+  --error: #b91c1c;
+  --error-bg: #fef2f2;
+  --radius: 8px;
+  --font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--bg-page);
+  color: var(--text-main);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Foco accesible obligatorio */
+input:focus-visible,
+select:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* --- Layout Principal --- */
+.lis-app-layout {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.lis-navbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+  padding: 0.75rem 1.5rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.lis-navbar-brand {
+  display: flex;
+  align-items: center;
+}
+
+.lis-logo-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-decoration: none;
+  color: var(--text-main);
+  font-weight: 700;
+  font-size: 1.15rem;
+}
+
+.lis-logo-icon {
+  font-size: 1.3rem;
+}
+
+.lis-nav-menu {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.lis-nav-item {
+  text-decoration: none;
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 0.95rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: var(--radius);
+  transition: all 0.2s;
+}
+
+.lis-nav-item:hover:not(.lis-nav-disabled) {
+  color: var(--primary);
+  background-color: #f1f5f9;
+}
+
+.lis-nav-item.active {
+  color: var(--primary);
+  font-weight: 600;
+  background-color: #e0f2fe;
+}
+
+.lis-nav-disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.lis-badge-soon {
+  font-size: 0.7rem;
+  background-color: #f1f5f9;
+  color: #64748b;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  border: 1px solid #cbd5e1;
+}
+
+.lis-navbar-user {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.lis-user-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.lis-user-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.lis-role-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.1rem 0.5rem;
+  border-radius: 12px;
+  text-transform: uppercase;
+}
+
+.lis-role-admin {
+  background-color: #ede9fe;
+  color: #6d28d9;
+}
+
+.lis-role-bioquimico {
+  background-color: #e0f2fe;
+  color: #0369a1;
+}
+
+.lis-user-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.lis-main-content {
+  flex: 1;
+  padding: 1.75rem 2rem;
+  max-width: 1280px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.lis-footer {
+  border-top: 1px solid var(--border-color);
+  background-color: var(--bg-card);
+  padding: 0.85rem 2rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.lis-footer-content {
+  max-width: 1280px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+}
+
+/* --- Botones --- */
+.lis-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-decoration: none;
+}
+
+.lis-btn-primary {
+  background-color: var(--primary);
+  color: #ffffff;
+}
+
+.lis-btn-primary:hover:not(:disabled) {
+  background-color: var(--primary-hover);
+}
+
+.lis-btn-secondary {
+  background-color: #f1f5f9;
+  color: #334155;
+  border-color: #cbd5e1;
+}
+
+.lis-btn-secondary:hover:not(:disabled) {
+  background-color: #e2e8f0;
+}
+
+.lis-btn-outline {
+  background-color: transparent;
+  color: var(--text-main);
+  border-color: var(--border-color);
+}
+
+.lis-btn-outline:hover:not(:disabled) {
+  background-color: #f8fafc;
+}
+
+.lis-btn-text {
+  background-color: transparent;
+  color: var(--primary);
+  border: none;
+  padding: 0.35rem 0.6rem;
+}
+
+.lis-btn-danger {
+  background-color: #fee2e2;
+  color: var(--error);
+  border-color: #fca5a5;
+}
+
+.lis-btn-danger:hover:not(:disabled) {
+  background-color: #fecaca;
+}
+
+.lis-btn-success {
+  background-color: #dcfce7;
+  color: var(--success);
+  border-color: #86efac;
+}
+
+.lis-btn-success:hover:not(:disabled) {
+  background-color: #bbf7d0;
+}
+
+.lis-btn-sm {
+  padding: 0.25rem 0.55rem;
+  font-size: 0.8rem;
+}
+
+.lis-btn-block {
+  width: 100%;
+}
+
+.lis-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* --- Formularios --- */
+.lis-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.lis-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.lis-form-group label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.lis-form-group input,
+.lis-form-group select {
+  padding: 0.55rem 0.75rem;
+  font-size: 0.95rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  background-color: #ffffff;
+  color: var(--text-main);
+  transition: border-color 0.15s;
+}
+
+.lis-form-group input:disabled,
+.lis-form-group select:disabled {
+  background-color: #f1f5f9;
+  cursor: not-allowed;
+}
+
+.lis-input-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.lis-form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.lis-form-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+/* --- Alertas --- */
+.lis-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  border: 1px solid transparent;
+}
+
+.lis-alert-error {
+  background-color: var(--error-bg);
+  color: var(--error);
+  border-color: #fecaca;
+}
+
+.lis-alert-warning {
+  background-color: var(--warning-bg);
+  color: var(--warning);
+  border-color: #fde68a;
+}
+
+.lis-alert-success {
+  background-color: var(--success-bg);
+  color: var(--success);
+  border-color: #bbf7d0;
+}
+
+/* --- Tarjeta de Login y Centrado --- */
+.lis-login-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 1.5rem;
+  background-color: #f1f5f9;
+}
+
+.lis-login-card {
+  width: 100%;
+  max-width: 440px;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 2rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.lis-brand-header {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.lis-brand-badge {
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  background-color: #e0f2fe;
+  color: var(--primary);
+  padding: 0.2rem 0.6rem;
+  border-radius: 16px;
+  margin-bottom: 0.25rem;
+}
+
+.lis-brand-header h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.lis-brand-sub {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.lis-text-warning {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.lis-login-footer {
+  text-align: center;
+  color: var(--text-muted);
+  border-top: 1px solid #f1f5f9;
+  padding-top: 1rem;
+}
+
+/* --- Pantalla de Carga --- */
+.lis-loading-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  gap: 1rem;
+  color: var(--text-muted);
+}
+
+.lis-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #e2e8f0;
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: lis-spin 0.8s linear infinite;
+}
+
+@keyframes lis-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --- Páginas y Contenedores --- */
+.lis-page-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.lis-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.lis-page-header h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.lis-page-sub {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+/* --- Barra de Filtros --- */
+.lis-filter-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+  background-color: var(--bg-card);
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  flex-wrap: wrap;
+}
+
+.lis-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.lis-filter-group label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.lis-filter-group input,
+.lis-filter-group select {
+  padding: 0.45rem 0.65rem;
+  font-size: 0.9rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  background-color: #ffffff;
+}
+
+.lis-search-input {
+  flex: 1;
+  min-width: 240px;
+}
+
+/* --- Tabla de Datos --- */
+.lis-table-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.lis-table-responsive {
+  overflow-x: auto;
+}
+
+.lis-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  text-align: left;
+}
+
+.lis-table th {
+  background-color: #f8fafc;
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  color: #475569;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.lis-table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+
+.lis-table tr:hover {
+  background-color: #f8fafc;
+}
+
+.lis-row-inactive {
+  background-color: #fafafa;
+  opacity: 0.8;
+}
+
+.lis-cell-bold {
+  font-weight: 600;
+}
+
+.lis-text-right {
+  text-align: right;
+}
+
+.lis-actions-cell {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.lis-status-badge {
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 12px;
+}
+
+.lis-status-active {
+  background-color: #f0fdf4;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.lis-status-inactive {
+  background-color: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.lis-table-loading,
+.lis-table-empty {
+  padding: 3rem 1rem;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+/* --- Modales --- */
+.lis-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  z-index: 100;
+  backdrop-filter: blur(2px);
+}
+
+.lis-modal-card {
+  background-color: var(--bg-card);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 580px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 90vh;
+}
+
+.lis-modal-alert {
+  max-width: 460px;
+}
+
+.lis-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.lis-modal-header h3 {
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.lis-modal-close {
+  background: transparent;
+  border: none;
+  font-size: 1.25rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.25rem;
+}
+
+.lis-modal-body {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  overflow-y: auto;
+}
+
+.lis-modal-card form {
+  padding: 1.5rem;
+  overflow-y: auto;
+}
+
+.lis-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding-top: 1rem;
+  border-top: 1px solid #f1f5f9;
+  margin-top: 0.5rem;
+}
+
+/* Caja de contraseña temporal */
+.lis-temp-password-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #f1f5f9;
+  border: 2px dashed #94a3b8;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+}
+
+.lis-temp-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: 0.08em;
+}
+
+/* --- Pantalla de Bienvenida / Home --- */
+.lis-welcome-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 2rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.lis-welcome-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.lis-welcome-icon {
+  font-size: 2.5rem;
+}
+
+.lis-welcome-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.25rem;
+  margin-top: 1.5rem;
+}
+
+.lis-action-card {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  background-color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.lis-action-card h3 {
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.lis-action-card p {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  flex: 1;
+}
+
+.lis-card-muted {
+  background-color: #ffffff;
+}

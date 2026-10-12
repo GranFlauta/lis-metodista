@@ -15,6 +15,7 @@ class Sesion(Base):
     Sesiones de usuario con latido y tope absoluto según docs/DECISIONES.md §6.
     """
     __tablename__ = "sesiones"
+    __table_args__ = {"schema": "laboratorio"}
 
     id_sesion = Column(
         UUID(as_uuid=True),
@@ -23,7 +24,7 @@ class Sesion(Base):
     )
     id_usuario = Column(
         BigInteger,
-        ForeignKey("usuarios.id_usuario"),
+        ForeignKey("laboratorio.usuarios.id_usuario"),
         nullable=False,
         index=True,
     )
@@ -56,10 +57,11 @@ class LogSeguridad(Base):
     Registro auditable de eventos de seguridad (LOGIN_OK, LOGIN_FALLIDO, LOGOUT, etc.).
     """
     __tablename__ = "log_seguridad"
+    __table_args__ = {"schema": "laboratorio"}
 
     id_log = Column(BigInteger, primary_key=True, autoincrement=True, index=True)
-    id_usuario = Column(BigInteger, ForeignKey("usuarios.id_usuario"), nullable=True)
-    id_objetivo = Column(BigInteger, ForeignKey("usuarios.id_usuario"), nullable=True)
+    id_usuario = Column(BigInteger, ForeignKey("laboratorio.usuarios.id_usuario"), nullable=True)
+    id_objetivo = Column(BigInteger, ForeignKey("laboratorio.usuarios.id_usuario"), nullable=True)
     accion = Column(String(40), nullable=False)
     ip = Column(INET)
     detalle = Column(JSONB, nullable=True)

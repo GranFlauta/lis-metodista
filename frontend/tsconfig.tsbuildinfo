@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/main.tsx"],"version":"5.9.3"}
+{"root":["./src/App.tsx","./src/main.tsx","./src/api/auth.ts","./src/api/client.ts","./src/api/usuarios.ts","./src/components/Layout.tsx","./src/features/admin/UsuariosPage.tsx","./src/features/auth/AuthProvider.tsx","./src/features/auth/CambiarPasswordPage.tsx","./src/features/auth/LoginPage.tsx","./src/features/auth/RutaProtegida.tsx","./src/features/home/HomePage.tsx"],"version":"5.9.3"}

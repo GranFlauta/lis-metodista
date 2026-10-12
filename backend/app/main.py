@@ -1,10 +1,23 @@
 from fastapi import FastAPI
 
-app = FastAPI(title="LIS Laboratorio Clínico", version="0.1.0")
+from app.api import auth, usuarios
+from app.core.errors import register_error_handlers
 
+app = FastAPI(
+    title="LIS Laboratorio Clínico",
+    version="0.1.0",
+    docs_url="/docs",
+    redoc_url=None,
+)
 
+# Registrar manejadores de excepciones para formato {"codigo": "...", "mensaje": "..."}
+register_error_handlers(app)
+
+# Healthcheck
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok"}
-# Fase 1: routers de auth/usuarios.  Ver docs/DECISIONES.md §9 (hoja de ruta).
 
+# Routers de la Fase 1
+app.include_router(auth.router)
+app.include_router(usuarios.router)

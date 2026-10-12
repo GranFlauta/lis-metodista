@@ -1,8 +1,11 @@
+from __future__ import annotations
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=(".env", "backend/.env"), extra="ignore")
 
     database_url: str
     jwt_secret: str
@@ -16,4 +19,13 @@ class Settings(BaseSettings):
     lockout_minutes: int = 15
     cookie_secure: bool = True                  # Cambiar a false si estás en desarrollo local sin HTTPS
 
+    @model_validator(mode="after")
+    def validate_jwt_secret(self) -> Settings:
+        if len(self.jwt_secret) < 32 or self.jwt_secret.startswith("CAMBIAR"):
+            raise ValueError(
+                "JWT_SECRET inválido: debe tener al menos 32 caracteres y no comenzar con 'CAMBIAR'."
+            )
+        return self
+
 settings = Settings()  # type: ignore[call-arg]
+

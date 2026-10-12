@@ -1,11 +1,11 @@
 """
 Esquemas Pydantic para el módulo de Autenticación y Seguridad (Fase 1).
-Basado estrictamente en docs/DECISIONES.md y el esquema de base de datos.
+Basado estrictamente en docs/DECISIONES.md y PROMPT_FASE_1.md §6.
 
 Incluye:
 1. Esquema de Login (credenciales de acceso).
-2. Esquema para cambio de contraseña obligatorio (flujo primer inicio / reset).
-3. Esquemas de respuesta para token JWT de acceso y datos del usuario autenticado.
+2. Esquema para cambio de contraseña obligatorio y voluntario.
+3. Esquemas de respuesta para token JWT de acceso, /me y datos del usuario.
 4. Esquema de respuesta administrativa con contraseña temporal en texto plano (14 caracteres).
 """
 
@@ -43,13 +43,12 @@ class LoginRequest(BaseModel):
 
 
 # -----------------------------------------------------------------------------
-# 2. Esquema para Cambio de Contraseña Obligatorio
+# 2. Esquema para Cambio de Contraseña (POST /api/auth/cambiar-password)
 # -----------------------------------------------------------------------------
 
-class CambioPasswordRequest(BaseModel):
+class CambiarPasswordRequest(BaseModel):
     """
-    Datos para el cambio obligatorio de contraseña (nuevo usuario o reset por admin)
-    o cambio voluntario. Valida la diferencia entre la clave actual y la nueva.
+    Cuerpo para POST /api/auth/cambiar-password según PROMPT_FASE_1.md §6.2.
     """
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -57,18 +56,23 @@ class CambioPasswordRequest(BaseModel):
         ...,
         min_length=1,
         max_length=128,
-        description="Contraseña actual o temporal asignada.",
+        description="Contraseña actual del usuario.",
     )
-    password_nuevo: str = Field(
+    password_nueva: str = Field(
         ...,
         min_length=10,
         max_length=128,
-        description="Nueva contraseña (debe cumplir longitud 10-128 caracteres y política de seguridad).",
+        description="Nueva contraseña que debe cumplir con la política clínica.",
     )
-    confirmar_password: str | None = Field(
-        default=None,
-        description="Confirmación opcional de la nueva contraseña para validación de formularios.",
-    )
+
+
+class CambioPasswordRequest(BaseModel):
+    """Alias compatible con formularios que usan password_nuevo y confirmación."""
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    password_actual: str = Field(..., min_length=1, max_length=128)
+    password_nuevo: str = Field(..., min_length=10, max_length=128)
+    confirmar_password: str | None = Field(default=None)
 
     @model_validator(mode="after")
     def validar_diferencia_y_coincidencia(self) -> CambioPasswordRequest:
@@ -83,11 +87,54 @@ class CambioPasswordRequest(BaseModel):
 # 3. Esquemas de Usuario y Token de Acceso
 # -----------------------------------------------------------------------------
 
+class UsuarioResumenResponse(BaseModel):
+    """
+    Representación resumida del usuario devuelta en login y refresh (§6.2).
+    """
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: int = Field(..., alias="id_usuario", description="Identificador único del usuario.")
+    usuario: str = Field(..., description="Login de usuario.")
+    nombres: str = Field(..., description="Nombres.")
+    apellido_paterno: str = Field(..., description="Primer apellido.")
+    apellido_materno: str | None = Field(default=None, description="Segundo apellido.")
+    rol: str = Field(..., description="Rol (ADMIN o BIOQUIMICO).")
+
+    @field_validator("rol", mode="before")
+    @classmethod
+    def extraer_nombre_rol(cls, value: Any) -> str:
+        if hasattr(value, "nombre"):
+            return str(value.nombre)
+        return str(value)
+
+
+class MeResponse(BaseModel):
+    """
+    Respuesta para GET /api/auth/me según PROMPT_FASE_1.md §6.2.
+    """
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: int = Field(..., alias="id_usuario", description="Identificador del usuario.")
+    usuario: str = Field(..., description="Login del usuario.")
+    nombres: str = Field(..., description="Nombres.")
+    apellido_paterno: str = Field(..., description="Primer apellido.")
+    apellido_materno: str | None = Field(default=None, description="Segundo apellido.")
+    rol: str = Field(..., description="Rol.")
+    debe_cambiar_password: bool = Field(..., description="Flag de cambio obligatorio de clave.")
+
+    @field_validator("rol", mode="before")
+    @classmethod
+    def extraer_nombre_rol(cls, value: Any) -> str:
+        if hasattr(value, "nombre"):
+            return str(value.nombre)
+        return str(value)
+
+
 class UsuarioResponse(BaseModel):
     """
-    Información pública del usuario autenticado (sin contraseñas ni datos sensibles).
+    Ficha completa pública del usuario.
     """
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id_usuario: int = Field(..., description="Identificador único del usuario.")
     id_rol: int | None = Field(default=None, description="Identificador del rol.")
@@ -112,15 +159,15 @@ class UsuarioResponse(BaseModel):
     @field_validator("rol", mode="before")
     @classmethod
     def extraer_nombre_rol(cls, value: Any) -> str:
-        """
-        Permite extraer el nombre del rol directamente desde el modelo SQLAlchemy Rol
-        o recibirlo como cadena de texto.
-        """
         if hasattr(value, "nombre"):
             return str(value.nombre)
-        if isinstance(value, str):
-            return value
         return str(value)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def id(self) -> int:
+        """Alias id para compatibilidad con el frontend."""
+        return self.id_usuario
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -134,17 +181,13 @@ class UsuarioResponse(BaseModel):
 
 class TokenResponse(BaseModel):
     """
-    Respuesta exitosa de autenticación con token JWT de acceso.
-    El refresh token opaco viaja exclusivamente en cookie HttpOnly/Secure/SameSite=Strict.
+    Respuesta exitosa de autenticación con token JWT de acceso (§6.2).
     """
     access_token: str = Field(..., description="Token de acceso JWT firmado.")
-    token_type: str = Field(default="bearer", description="Tipo de autorización HTTP (Bearer).")
+    token_type: str = Field(default="bearer", description="Tipo de autorización HTTP (bearer).")
     expires_in: int = Field(..., description="Tiempo de vigencia del token de acceso en segundos.")
-    debe_cambiar_password: bool = Field(
-        ...,
-        description="Informa al cliente si debe forzar la redirección a la pantalla de cambio de clave.",
-    )
-    usuario: UsuarioResponse = Field(..., description="Detalles del usuario autenticado.")
+    debe_cambiar_password: bool = Field(..., description="Informa si debe forzarse el cambio de clave.")
+    usuario: UsuarioResumenResponse = Field(..., description="Detalles del usuario autenticado.")
 
 
 # -----------------------------------------------------------------------------
@@ -153,13 +196,13 @@ class TokenResponse(BaseModel):
 
 class UsuarioAdminResponse(BaseModel):
     """
-    Respuesta para el Administrador tras registrar un usuario nuevo o ejecutar un reset de clave.
-    Devuelve la contraseña temporal generada aleatoriamente de exactamente 14 caracteres en texto plano
-    para ser comunicada al usuario por única vez (DECISIONES.md §6).
+    Respuesta para el Administrador tras registrar un usuario nuevo o ejecutar reset.
+    Devuelve la contraseña temporal aleatoria de 14 caracteres en texto plano por única vez (§6.3).
     """
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
-    id_usuario: int = Field(..., description="Identificador único del usuario.")
+    id: int = Field(..., alias="id_usuario", description="Identificador único del usuario.")
+    id_usuario: int | None = Field(default=None, description="Alias para id_usuario.")
     id_rol: int | None = Field(default=None, description="Identificador del rol.")
     rol: str = Field(..., description="Nombre del rol asignado.")
     usuario: str = Field(..., description="Login de usuario.")
@@ -191,8 +234,6 @@ class UsuarioAdminResponse(BaseModel):
     def extraer_nombre_rol(cls, value: Any) -> str:
         if hasattr(value, "nombre"):
             return str(value.nombre)
-        if isinstance(value, str):
-            return value
         return str(value)
 
     @computed_field  # type: ignore[prop-decorator]
@@ -204,11 +245,9 @@ class UsuarioAdminResponse(BaseModel):
         return " ".join(partes)
 
 
-# -----------------------------------------------------------------------------
-# Aliases para compatibilidad idiomática
-# -----------------------------------------------------------------------------
+# Aliases
 LoginSchema = LoginRequest
-PasswordChangeRequest = CambioPasswordRequest
+PasswordChangeRequest = CambiarPasswordRequest
 UsuarioInfoResponse = UsuarioResponse
 UsuarioCreadoAdminResponse = UsuarioAdminResponse
 UsuarioResetPasswordAdminResponse = UsuarioAdminResponse
