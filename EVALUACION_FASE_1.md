@@ -87,51 +87,59 @@ Hasta este punto, se ha construido de forma sólida y funcional el núcleo de se
 
 ---
 
-## 5. Estado Actual del Repositorio y Verificación End-to-End
+## 5. Estado Actual del Repositorio y Verificación End-to-End (Fase 1 y 1.5)
 
-- **52 tests ejecutados y pasando (100 % de éxito)**:
+- **56 tests automatizados ejecutados y pasando (100 % de éxito, 0 omitidos)**:
   - 25 tests Fase 0 (catálogo clínico, rangos, fórmulas y evaluador AST seguro).
-  - 27 tests Fase 1 (política de contraseñas, login, cookies, latido clínico, timeouts, autorización de roles, bajas lógicas, prohibición de DELETE y arranque seguro).
-  - Probados contra PostgreSQL real (`lis_test`) y reloj simulado (`clock.py`).
-- **Seguridad**:
-  - Cero uso de `localStorage` o `sessionStorage` en todo el frontend.
+  - 31 tests Fase 1 y 1.5:
+    * Tests 1–4: Hashing Argon2id, política estricta de contraseñas, claves prohibidas y temporal sin ambiguos.
+    * Tests nuevos G5: Validación de `DUMMY_ARGON2_HASH` dinámico con `VerifyMismatchError`, invocación real de verificación ficticia ante usuario inexistente en login, tamaño de `CLAVES_PROHIBIDAS == 21` y excepción ante falla de generación temporal.
+    * Tests 5–9: Login, cookie `SameSite=Strict`, 401 unificado para usuario inexistente/inactivo/clave errónea, bloqueo tras 5 intentos, reinicio y logs con IP y sin contraseñas.
+    * Tests 10–18: Latido cada 30 s, muerte por falta de latido (150 s), inactividad (30 min), tope absoluto (12 h), refresh con cabecera `X-LIS-Client`, logout 204, bloqueo `DEBE_CAMBIAR_PASSWORD`, cambio de clave y desactivación inmediata.
+    * Tests 19–26: Restricción a `ADMIN`, creación con clave temporal única, conflictos 409, baja lógica 204 y reactivación, protección del último administrador, prohibición de `DELETE` (404/405), reset de clave y no filtración de hashes.
+    * Test 27: Validación de arranque seguro ante `JWT_SECRET` inseguro.
+- **Arnés de pruebas robusto**:
+  - `scripts/crear_bd_test.sh` recrea la base `lis_test` aplicando `001_schema.sql` y `002_seed_catalogo.sql`.
+  - La clase base `IntegrationTestCase` verifica que existan las tablas `usuarios`, `sesiones`, `log_seguridad`, `informes`, `folios` y el trigger `trg_proteger_informe` en el esquema `laboratorio`.
+  - Se eliminó `Base.metadata.create_all` y se suprimió `SkipTest` para que cualquier falla de conexión o esquema sea un error explícito.
+- **Seguridad y Superficie de Red**:
+  - Cero exposición pública de PostgreSQL: `ports` eliminado de `docker-compose.yml` base; para desarrollo local se utiliza `docker-compose.override.yml` atado exclusivamente a `127.0.0.1:5432:5432`.
+  - Eliminado el mapeo `8080:80` roto de Caddy; el acceso HTTPS opera en `8443:443` con dominio `lis.local`.
+  - Cero uso de `localStorage` o `sessionStorage` en el frontend.
   - Cero llamadas a `eval()`, `exec()`, `pickle` o consultas SQL concatenadas.
-  - Cero llamadas directas a `datetime.now()` en la aplicación (únicamente en `clock.py`).
-  - Prohibición estricta de ruta `DELETE /api/usuarios/{id}` (404/405).
-- **Esquema protegido**: Sin modificaciones a `db/init/*.sql` ni a `backend/app/catalog/`.
-- **Compatibilidad e Infraestructura Podman**:
-  - Contenedores `lis_db_1`, `lis_backend_1`, `lis_backup_1`, `lis_web_1` operando en Podman.
-  - Caddy HTTPS con TLS interno resolviendo `lis.local:8443` y proxy hacia FastAPI en puerto 8000.
-- **Flujo Clínico Validado en Producción Local**:
-  1. `podman exec -i lis_backend_1 python -m app.cli crear-admin --forzar` generó usuario `admin_test` con contraseña temporal de 14 caracteres.
-  2. `POST /api/auth/login` retornó token de acceso con flag obligatorio `debe_cambiar_password: true` y cookie `HttpOnly; SameSite=Strict; Secure`.
-  3. `GET /api/usuarios` rechazado con HTTP 403 `DEBE_CAMBIAR_PASSWORD`.
-  4. `POST /api/auth/cambiar-password` ejecutado exitosamente (HTTP 204).
-  5. `GET /api/auth/me` confirmó `debe_cambiar_password: false`.
-  6. `GET /api/usuarios` accesible y auditado en `laboratorio.log_seguridad`.
+  - Reloj 100% desacoplado en `app.core.clock::ahora()`.
+  - `DUMMY_ARGON2_HASH` generado dinámicamente con `secrets.token_urlsafe(16)` y excepciones acotadas en `verify_password`.
+- **Consistencia de Entornos**:
+  - `backend/Dockerfile` alineado a `FROM python:3.14-slim`, en total concordancia con `Python 3.14.8` del host.
+  - Dependencias fijadas idénticas entre `requirements.txt` y `pip freeze`, sin librerías obsoletas (`psycopg2` ausente).
+  - Frontend verificado con `npm run build` limpio y dependencias auditadas (`npm ls --depth=0` con solo `react-router-dom`).
+- **Esquema protegido**:
+  - `git diff --stat d9bf297 HEAD -- db/init backend/app/catalog` completamente vacío.
 
 ---
 
-## 6. Checklist de Criterios de Aceptación (PROMPT_FASE_1.md §14)
+## 6. Checklist de Criterios de Aceptación (Cierre Definitivo Fase 1.5)
 
-- [x] `TEST_DATABASE_URL=... python -m unittest discover -s tests -v` → 52 tests OK (25 previos + 27 nuevos).
-- [x] `podman compose up -d --build` levanta `db`, `backend`, `web` sin errores; `curl -k --resolve lis.local:8443:127.0.0.1 https://lis.local:8443/api/health` → `{"status":"ok"}`.
-- [x] `podman exec -it lis_backend_1 python -m app.cli crear-admin` crea el administrador con contraseña temporal única de 14 caracteres.
-- [x] Flujo manual: login con la temporal → se fuerza el cambio de clave → entra → crea usuario `BIOQUIMICO` → este inicia sesión y no ve menú "Administración".
-- [x] F5 no cierra sesión (restauración en caliente vía `/api/auth/refresh` con cookie y token en memoria).
-- [x] Cerrar pestaña o suspender latido > 150 s (`SESSION_DEAD_AFTER_SECONDS`) revoca sesión y fuerza re-login.
-- [x] `grep -rn "localStorage\|sessionStorage" frontend/src` → 0 resultados.
-- [x] `grep -rniE "eval\(|exec\(|pickle" backend/app` → 0 resultados fuera del evaluador AST seguro.
-- [x] `grep -rn "datetime.now\|datetime.utcnow" backend/app` → solo en `core/clock.py`.
-- [x] `.env` no está versionado (`.gitignore` respetado).
-- [x] Ningún archivo de catálogo ni `db/init/*.sql` fue modificado (`git diff --stat` limpio).
+- [x] `scripts/crear_bd_test.sh` recrea la BD de pruebas con esquema y catálogo completos.
+- [x] Suite de 56 tests ejecutada desde `backend/` con `TEST_DATABASE_URL` → 100 % OK, 0 fallos, 0 skipped.
+- [x] PostgreSQL aislado de la red exterior en la configuración base de compose.
+- [x] Redirección HTTPS en Caddy depurada (eliminado puerto 8080 conflictivo).
+- [x] Contenedor backend compilado con `python:3.14-slim` y probado con `import app.main; print('ok')`.
+- [x] Criptografía de contraseñas blindada (hash dummy dinámico, mitigación de temporización probada con mock).
+- [x] Frontend compilado y sin almacenamiento en cliente (`localStorage`/`sessionStorage` = 0).
+- [x] Documentación exhaustiva en `docs/SUPUESTOS.md` (13 entradas registradas).
+- [x] Tag Git `fase-1-cerrada` listo para ser marcado.
 
 ---
 
 ## 7. Dictamen y Transición a Fase 2
 
-**Fase 1 completada, auditada y aprobada al 100 %.**
+**Fase 1 cerrada, auditada y certificada formalmente.**
 
-El sistema cuenta con la base de infraestructura, autenticación criptográfica, manejo de sesión clínica por latido, auditoría y control de acceso por roles requerida para la **Fase 2: Gestión de Pacientes, Órdenes y Carga de Resultados**.
+El sistema cuenta con el núcleo de seguridad, sesión por latido clínico, gestión de usuarios, infraestructura de contenedores y suite de pruebas determinista requerida para iniciar la:
+
+**Fase 2: Gestión de Pacientes y Órdenes**
+*(Nota: la Carga de Resultados y Fórmulas en API corresponden a la Fase 3).*
+
 
 
