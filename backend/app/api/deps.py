@@ -34,18 +34,16 @@ WHITELIST_CAMBIO_PASSWORD = (
 
 
 def obtener_ip_cliente(request: Request) -> str | None:
-    """Extrae la IP real del cliente compatible con PostgreSQL INET."""
-    ip_raw: str | None = None
-    x_forwarded_for = request.headers.get("x-forwarded-for")
-    if x_forwarded_for:
-        ip_raw = x_forwarded_for.split(",")[0].strip()
-    elif request.client and request.client.host:
-        ip_raw = request.client.host
-
-    if not ip_raw:
+    """
+    Obtiene la IP del cliente usando request.client.host.
+    Uvicorn (con --proxy-headers) resuelve automáticamente la IP del cliente enviada por Caddy.
+    """
+    if not request.client or not request.client.host:
         return None
 
-    if ip_raw == "testclient":
+    ip_raw = request.client.host.strip()
+
+    if ip_raw in ("testclient", "localhost", "::1"):
         return "127.0.0.1"
 
     try:
@@ -54,6 +52,7 @@ def obtener_ip_cliente(request: Request) -> str | None:
         return ip_raw
     except ValueError:
         return None
+
 
 
 def registrar_evento_seguridad(
