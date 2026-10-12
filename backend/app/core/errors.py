@@ -104,6 +104,21 @@ class CuentaBloqueadaError(AppError):
         )
 
 
+class OrdenDuplicadaEnCursoError(AppError):
+    def __init__(self, mensaje: str = "Existe una orden en curso con estos estudios para el paciente.", detalle: dict[str, Any] | None = None) -> None:
+        super().__init__(
+            status.HTTP_409_CONFLICT,
+            "ORDEN_DUPLICADA_EN_CURSO",
+            mensaje,
+            extra={"detalle": detalle} if detalle else None,
+        )
+
+
+class ConflictoVersionError(AppError):
+    def __init__(self, mensaje: str = "El recurso fue modificado por otra transacción.") -> None:
+        super().__init__(status.HTTP_409_CONFLICT, "CONFLICTO_VERSION", mensaje)
+
+
 def register_error_handlers(app: FastAPI) -> None:
     """Registra los manejadores de excepciones estándar en la instancia de FastAPI."""
 

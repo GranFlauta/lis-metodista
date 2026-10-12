@@ -186,3 +186,13 @@ def require_admin(
     if rol_nombre != "ADMIN":
         raise ProhibidoError("Acceso restringido: Se requieren privilegios de Administrador.")
     return current_user
+
+
+def require_bioquimico(
+    current_user: Usuario = Depends(require_auth),
+) -> Usuario:
+    """Garantiza que el usuario autenticado posea rol BIOQUIMICO."""
+    rol_nombre = current_user.rol.nombre if current_user.rol else ""
+    if rol_nombre != "BIOQUIMICO":
+        raise ProhibidoError("Acceso restringido: Se requieren privilegios de Bioquímico.")
+    return current_user
