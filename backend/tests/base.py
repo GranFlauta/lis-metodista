@@ -1,9 +1,11 @@
 """
 Utilidades base para pruebas unitarias y de integración del sistema LIS.
-PROMPT_FASE_1.md §10:
-- Soporte para PostgreSQL real vía TEST_DATABASE_URL.
+PROMT_FASE_1.5_CERRAR.md §3 G1:
+- Conexión a PostgreSQL real vía TEST_DATABASE_URL (sin saltarse pruebas con SkipTest).
+- Captura estricta de sqlalchemy.exc.OperationalError.
+- Verificación de integridad del esquema real (tablas y trigger trg_proteger_informe).
+- Prohibición de Base.metadata.create_all (la BD se crea con scripts/crear_bd_test.sh).
 - Manejo de reloj simulado a través de app.core.clock.
-- Fixtures de limpieza de datos e inicialización de roles.
 """
 
 from __future__ import annotations
@@ -15,11 +17,12 @@ from typing import Generator
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.clock import reset_clock, set_simulated_time
 from app.core.config import settings
-from app.core.database import Base, get_db
+from app.core.database import get_db
 from app.core.security import get_password_hash
 from app.main import app
 from app.models.session import LogSeguridad, Sesion
@@ -30,33 +33,22 @@ TEST_DATABASE_URL = os.environ.get(
     os.environ.get("DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/lis_test"),
 )
 
-test_engine = None
-TestingSessionLocal = None
-POSTGRES_DISPONIBLE = False
+_connect_args = {}
+if "postgresql" in TEST_DATABASE_URL:
+    _connect_args["options"] = "-csearch_path=laboratorio,public"
 
-try:
-    _connect_args = {}
-    if "postgresql" in TEST_DATABASE_URL:
-        _connect_args["options"] = "-csearch_path=laboratorio,public"
-
-    _engine = create_engine(
-        TEST_DATABASE_URL,
-        pool_pre_ping=True,
-        connect_args=_connect_args,
-    )
-    with _engine.connect() as conn:
-        conn.execute(text("SELECT 1"))
-    test_engine = _engine
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
-    POSTGRES_DISPONIBLE = True
-except Exception:
-    POSTGRES_DISPONIBLE = False
+test_engine = create_engine(
+    TEST_DATABASE_URL,
+    pool_pre_ping=True,
+    connect_args=_connect_args,
+)
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
 
 class IntegrationTestCase(unittest.TestCase):
     """
     Clase base para pruebas de integración con PostgreSQL real.
-    Si la base de datos no está disponible, omite los tests con un mensaje claro.
+    Falla explícitamente si la base de datos no está disponible o el esquema está incompleto.
     """
 
     db: Session
@@ -64,20 +56,42 @@ class IntegrationTestCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        if not POSTGRES_DISPONIBLE:
-            raise unittest.SkipTest(
-                "PostgreSQL de prueba no disponible. "
-                "Para ejecutar tests de integración levante la base de datos (ej. docker compose up -d db) "
-                "o defina TEST_DATABASE_URL."
-            )
+        # 1. Comprobar conectividad con PostgreSQL real (solo capturando OperationalError)
+        try:
+            with test_engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+        except OperationalError as exc:
+            raise AssertionError(
+                f"La base de datos de pruebas no responde en '{TEST_DATABASE_URL}': {exc}. "
+                "Asegúrese de levantar la base de datos (ej. podman compose up -d db) "
+                "y definir la variable TEST_DATABASE_URL correctamente."
+            ) from exc
 
-        # Asegurar esquema y tablas en la BD de prueba
+        # 2. Verificar que existan las tablas requeridas y el trigger en el esquema 'laboratorio'
+        tablas_requeridas = {"usuarios", "sesiones", "log_seguridad", "informes", "folios"}
         with test_engine.connect() as conn:
-            conn.execute(text("CREATE SCHEMA IF NOT EXISTS laboratorio"))
-            conn.commit()
-        Base.metadata.create_all(bind=test_engine)
+            result = conn.execute(text(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'laboratorio'"
+            ))
+            tablas_existentes = {row[0] for row in result}
+            faltantes = tablas_requeridas - tablas_existentes
+            if faltantes:
+                raise AssertionError(
+                    f"Esquema de BD incompleto en 'laboratorio'. Faltan las tablas: {sorted(faltantes)}. "
+                    "Ejecute 'scripts/crear_bd_test.sh' para recrear la BD de pruebas con el esquema oficial."
+                )
 
-        # Sembrar roles básicos si no existen
+            res_trg = conn.execute(text(
+                "SELECT 1 FROM information_schema.triggers "
+                "WHERE trigger_schema = 'laboratorio' AND trigger_name = 'trg_proteger_informe'"
+            )).first()
+            if not res_trg:
+                raise AssertionError(
+                    "No se encontró el trigger 'trg_proteger_informe' en el esquema 'laboratorio'. "
+                    "Ejecute 'scripts/crear_bd_test.sh' para aplicar 001_schema.sql en la BD de pruebas."
+                )
+
+        # 3. Sembrar roles básicos si no existen
         with TestingSessionLocal() as session:
             admin_rol = session.query(Rol).filter(Rol.nombre == "ADMIN").first()
             if not admin_rol:
