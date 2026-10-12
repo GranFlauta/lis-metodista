@@ -21,12 +21,17 @@ from typing import Mapping, Optional
 class NoCalculable(Exception):
     """Falta una entrada, división por cero o regla de validez incumplida."""
 
+    def __init__(self, mensaje: str, codigo_motivo: Optional[str] = None):
+        super().__init__(mensaje)
+        self.codigo_motivo = codigo_motivo
+
 
 @dataclass(frozen=True)
 class ResultadoCalculo:
     valor: Optional[Decimal]
     calculable: bool
     motivo: Optional[str] = None
+    codigo_motivo: Optional[str] = None
 
 
 _BIN = {
@@ -46,7 +51,7 @@ _CMP = {
 
 
 def _no_calculable() -> None:
-    raise NoCalculable("regla de validez incumplida")
+    raise NoCalculable("regla de validez incumplida", codigo_motivo="REGLA_INVALIDA")
 
 
 _FUNCS = {"no_calculable": _no_calculable, "abs": abs, "min": min, "max": max}
@@ -79,7 +84,7 @@ def _eval(nodo: ast.AST, ctx: Mapping[str, Optional[Decimal]]):
             raise ValueError(f"parámetro desconocido: {nodo.id}")
         valor = ctx[nodo.id]
         if valor is None:
-            raise NoCalculable(f"falta {nodo.id}")
+            raise NoCalculable(f"falta {nodo.id}", codigo_motivo="FALTA_ENTRADA")
         return valor
     if isinstance(nodo, ast.UnaryOp) and isinstance(nodo.op, (ast.USub, ast.UAdd)):
         v = _eval(nodo.operand, ctx)
@@ -87,7 +92,7 @@ def _eval(nodo: ast.AST, ctx: Mapping[str, Optional[Decimal]]):
     if isinstance(nodo, ast.BinOp) and type(nodo.op) in _BIN:
         izq, der = _eval(nodo.left, ctx), _eval(nodo.right, ctx)
         if isinstance(nodo.op, ast.Div) and der == 0:
-            raise NoCalculable("división por cero")
+            raise NoCalculable("división por cero", codigo_motivo="DIVISION_POR_CERO")
         return _BIN[type(nodo.op)](izq, der)
     if isinstance(nodo, ast.Compare):
         izq = _eval(nodo.left, ctx)
@@ -122,7 +127,7 @@ def calcular(
     try:
         valor = _eval(arbol, entradas)
     except NoCalculable as exc:
-        return ResultadoCalculo(None, False, str(exc))
+        return ResultadoCalculo(None, False, str(exc), exc.codigo_motivo)
     if isinstance(valor, bool):
         raise ValueError("la fórmula debe devolver un número")
     return ResultadoCalculo(redondear(valor, decimales), True)

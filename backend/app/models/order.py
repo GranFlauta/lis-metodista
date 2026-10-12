@@ -60,6 +60,7 @@ class OrdenEstudio(Base):
     estudio = relationship("Estudio")
     estudio_version = relationship("EstudioVersion")
     grupos = relationship("OrdenEstudioGrupo", back_populates="orden_estudio", cascade="all, delete-orphan")
+    resultados = relationship("ResultadoBorrador", back_populates="orden_estudio", cascade="all, delete-orphan")
 
 
 class OrdenEstudioGrupo(Base):

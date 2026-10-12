@@ -7,7 +7,7 @@ Permite simulación temporal determinista en pruebas unitarias e integración.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 # Variable para tiempo simulado en entornos de test
 _simulated_time: datetime | None = None
@@ -24,13 +24,17 @@ def ahora() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def set_simulated_time(dt: datetime | None) -> None:
+def set_simulated_time(dt: datetime | date | None) -> None:
     """
     Establece el tiempo simulado para testing.
     """
     global _simulated_time
-    if dt is not None and dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+    if dt is not None:
+        if isinstance(dt, datetime):
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+        elif isinstance(dt, date):
+            dt = datetime(dt.year, dt.month, dt.day, tzinfo=timezone.utc)
     _simulated_time = dt
 
 

@@ -3,6 +3,7 @@ from app.models.session import Sesion, LogSeguridad
 from app.models.catalog import Estudio, EstudioVersion, Parametro, RangoReferencia, Perfil, PerfilEstudio
 from app.models.patient import Paciente
 from app.models.order import Orden, OrdenEstudio, OrdenEstudioGrupo, BorradorDescartado
+from app.models.result import ResultadoBorrador, LaboratorioConfig
 
 __all__ = [
     "Rol",
@@ -20,4 +21,6 @@ __all__ = [
     "OrdenEstudio",
     "OrdenEstudioGrupo",
     "BorradorDescartado",
+    "ResultadoBorrador",
+    "LaboratorioConfig",
 ]

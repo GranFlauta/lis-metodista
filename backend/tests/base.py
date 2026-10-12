@@ -26,13 +26,14 @@ from app.core.database import get_db
 from app.core.security import get_password_hash
 from app.main import app
 from app.models.order import BorradorDescartado, Orden, OrdenEstudio, OrdenEstudioGrupo
+from app.models.result import ResultadoBorrador
 from app.models.patient import Paciente
 from app.models.session import LogSeguridad, Sesion
 from app.models.user import Rol, Usuario
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
-    os.environ.get("DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/lis_test"),
+    "postgresql+psycopg://lis_app:CAMBIAR_por_una_clave_larga_y_aleatoria@127.0.0.1:5432/lis_test",
 )
 
 _connect_args = {}
@@ -108,7 +109,12 @@ class IntegrationTestCase(unittest.TestCase):
         self.db = TestingSessionLocal()
 
         # Limpiar datos transaccionales entre pruebas en orden estricto de dependencias
+        self.db.execute(text("SET session_replication_role = 'replica'"))
+        self.db.execute(text("DELETE FROM laboratorio.informes"))
+        self.db.execute(text("DELETE FROM laboratorio.folios"))
+        self.db.execute(text("SET session_replication_role = 'origin'"))
         self.db.query(BorradorDescartado).delete()
+        self.db.query(ResultadoBorrador).delete()
         self.db.query(OrdenEstudioGrupo).delete()
         self.db.query(OrdenEstudio).delete()
         self.db.query(Orden).delete()

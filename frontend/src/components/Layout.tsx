@@ -47,13 +47,23 @@ export const Layout: React.FC = () => {
             </NavLink>
           )}
 
-          {/* Enlaces futuros: deshabilitados con texto 'Próximamente' (§4.2) */}
-          <span className="lis-nav-item lis-nav-disabled" title="Disponible en Fase 2">
-            Órdenes <span className="lis-badge-soon">Próximamente</span>
-          </span>
-          <span className="lis-nav-item lis-nav-disabled" title="Disponible en Fase 2">
-            Pacientes <span className="lis-badge-soon">Próximamente</span>
-          </span>
+          {/* Enlace activo a Pacientes (Fase 2 Bloque 4) */}
+          <NavLink
+            to="/pacientes"
+            className={({ isActive }) => `lis-nav-item ${isActive ? "active" : ""}`}
+          >
+            Pacientes
+          </NavLink>
+
+          {/* Enlace activo a Órdenes (Fase 2 Bloque 5) */}
+          <NavLink
+            to="/ordenes"
+            className={({ isActive }) => `lis-nav-item ${isActive ? "active" : ""}`}
+          >
+            Órdenes
+          </NavLink>
+
+          {/* Enlace futuro: deshabilitado con texto 'Próximamente' (§4.2, §9) */}
           <span className="lis-nav-item lis-nav-disabled" title="Disponible en Fase 3">
             Informes <span className="lis-badge-soon">Próximamente</span>
           </span>

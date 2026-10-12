@@ -61,6 +61,11 @@ export async function apiClient<T>(endpoint: string, options: RequestOptions = {
 
   const headers = new Headers(fetchOptions.headers || {});
 
+  // Omitir pantalla de advertencia de ngrok en túneles gratuitos
+  if (!headers.has("ngrok-skip-browser-warning")) {
+    headers.set("ngrok-skip-browser-warning", "true");
+  }
+
   // Adjuntar cabecera CSRF requerida en refresh y logout (§5)
   if (endpoint.includes("/api/auth/refresh") || endpoint.includes("/api/auth/logout")) {
     headers.set("X-LIS-Client", "web");

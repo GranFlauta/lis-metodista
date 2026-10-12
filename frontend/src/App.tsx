@@ -12,6 +12,12 @@ import { LoginPage } from "./features/auth/LoginPage";
 import { CambiarPasswordPage } from "./features/auth/CambiarPasswordPage";
 import { HomePage } from "./features/home/HomePage";
 import { UsuariosPage } from "./features/admin/UsuariosPage";
+import { PacientesPage } from "./features/pacientes/PacientesPage";
+import { PacienteDetallePage } from "./features/pacientes/PacienteDetallePage";
+import { OrdenesPage } from "./features/ordenes/OrdenesPage";
+import { NuevaOrdenPage } from "./features/ordenes/NuevaOrdenPage";
+import { OrdenDetallePage } from "./features/ordenes/OrdenDetallePage";
+import { CapturaResultadosPage } from "./features/ordenes/CapturaResultadosPage";
 import { Layout } from "./components/Layout";
 import "./index.css";
 
@@ -43,6 +49,19 @@ export default function App() {
             }
           >
             <Route index element={<HomePage />} />
+            <Route path="pacientes" element={<PacientesPage />} />
+            <Route path="pacientes/:id" element={<PacienteDetallePage />} />
+            <Route path="ordenes" element={<OrdenesPage />} />
+            <Route
+              path="ordenes/nueva"
+              element={
+                <RutaProtegida rolRequerido="BIOQUIMICO">
+                  <NuevaOrdenPage />
+                </RutaProtegida>
+              }
+            />
+            <Route path="ordenes/:id" element={<OrdenDetallePage />} />
+            <Route path="ordenes/:id/captura" element={<CapturaResultadosPage />} />
             <Route
               path="admin/usuarios"
               element={

@@ -185,3 +185,17 @@ Congela todo lo necesario para reimprimir idéntico aunque el catálogo cambie:
 * **D2-09** Etiqueta provisional de los grupos de Inmunoserología: código humanizado + nombres de sus parámetros, hasta que exista metadata de grupos.
 * **D2-10** `numero_orden_paciente = MAX + 1` bajo bloqueo de la fila del paciente. Si se descarta la última orden, su número puede reutilizarse (son borradores privados; el folio sí es inviolable).
 * **D2-11** PENDIENTE antes de producción: auditoría de ediciones de pacientes (el esquema actual no tiene tabla ni acción para ello).
+
+## 12. Decisiones de Fase 3 (captura y cálculo)
+
+* **D3-01** Alcance: captura, cálculo, banderas, validaciones y estado `INCOMPLETO↔COMPLETO`. NO incluye publicar, folios, informes, PDF, ediciones de informes oficiales (`id_edicion` siempre NULL) ni delegación (solo el autor edita; B llega en la Fase 7).
+* **D3-02** El backend es la única fuente de verdad del cálculo. `POST /calcular` es una vista previa sin escritura; `PUT /resultados` persiste y recalcula todo. El cliente NUNCA envía valores de parámetros calculados.
+* **D3-03** Qué se captura: los parámetros de la versión de estudio congelada en la orden. En estudios de selección parcial, solo los parámetros cuyo `grupo` figura en `orden_estudio_grupos`.
+* **D3-04** Valores: NUMERICO acepta coma o punto; se guarda con punto en `valor_numerico` tal cual lo digitó (sin redondear); máx. 6 decimales; no negativos. SELECCION debe estar en `opciones`. TEXTO ≤ 500 caracteres; RECUENTO ≤ 50; FECHA ISO no futura (se guarda como texto `AAAA-MM-DD`). Vacío = ausente: nunca se guarda 0 ni cadena vacía.
+* **D3-05** Valores por defecto (`requiere_confirmacion`): se muestran como **virtuales** (no se guardan). Solo cuentan para completar cuando existe una fila `confirmado = TRUE`, creada al confirmarlos explícitamente o al editarlos a mano.
+* **D3-06** Una orden es `COMPLETO` si todo parámetro `obligatorio` del alcance está resuelto: capturado y confirmado, o CALCULADO calculable, o CALCULADO no calculable por regla de validez/división por cero (p. ej. LDL con TG > 400 se informa "No calculable" y NO bloquea). CALCULADO sin entradas completas = pendiente. Una regla cruzada de severidad ERROR bloquea `COMPLETO`; ADVERTENCIA no.
+* **D3-07** Banderas por rango: se elige el rango por sexo del paciente (o ambos) y, si el rango trae `edad_min/max_meses`, por la edad de la orden en meses. Respeta límites inclusivos/exclusivos. Solo para valores numéricos; los cualitativos no llevan bandera en v1.
+* **D3-08** Los calculados se persisten (`es_calculado = TRUE`); si no son calculables por regla, fila con `calculable = FALSE` y valor NULL; si faltan entradas, sin fila.
+* **D3-09** Guardar resultados NO modifica `ordenes.fila_version` (esa versión protege solo la cabecera). Dos pestañas del mismo autor = última escritura gana por parámetro; cada escritura bloquea la fila de la orden (`FOR UPDATE`).
+* **D3-10** La API usa el punto decimal como formato canónico. La interfaz muestra según `laboratorio_config.separador_decimal` (hoy sembrado en coma). La decisión de negocio sobre el separador sigue pendiente (§10, punto 9).
+* **D3-11** PENDIENTE: valores críticos y límites fisiológicos (p. ej. % > 100); permitir reemplazar GR/Hb estimados por valor medido (v1.1).
