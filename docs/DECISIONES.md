@@ -171,3 +171,17 @@ Congela todo lo necesario para reimprimir idéntico aunque el catálogo cambie:
 12. **Autor inactivo**: si A deja el laboratorio, nadie podría corregir sus informes. Falta definir un mecanismo de transferencia de autoría.
 13. RUC, teléfono, horario y logo para el encabezado/pie del informe.
 14. Usar siempre **datos ficticios** en desarrollo y pruebas (la imagen de referencia contiene los datos de una paciente real).
+
+## 11. Decisiones de Fase 2 (pacientes, órdenes, catálogo)
+
+* **D2-01** La Fase 2 NO incluye captura de resultados ni cálculo (son Fase 3).
+* **D2-02** Una orden se crea con su lista FINAL de estudios. En v1 los estudios de un borrador no se editan: para cambiarlos se descarta el borrador y se crea otro. (Revisar en Fase 3.)
+* **D2-03** Crear paciente + Orden N°1 es una sola transacción (`POST /api/ordenes` con `paciente` anidado). Si falla la orden, no queda paciente.
+* **D2-04** Detección de trabajo duplicado, a granularidad (estudio) o (estudio, grupo) en estudios de selección parcial (Inmunoserología). Solo contra borradores `INCOMPLETO`/`COMPLETO`, no bloqueados, de OTRO usuario. Solapamiento parcial → advertencia. Todos los estudios de la orden nueva ya presentes en UN mismo borrador ajeno → bloqueo 409 `ORDEN_DUPLICADA_EN_CURSO`. Delegación y urgencia llegan en la Fase 7; hasta entonces el bloqueo se resuelve esperando a que el otro autor publique o descarte.
+* **D2-05** La advertencia/bloqueo revela solo nombre del autor y códigos de estudio; nunca ids de orden ni resultados.
+* **D2-06** ADMIN: lee pacientes; lee órdenes ajenas con registro `ADMIN_VE_PRIVADO` en `log_seguridad`. No crea ni modifica nada.
+* **D2-07** Una orden ajena para un BIOQUIMICO responde 404 (no 403) para no revelar su existencia.
+* **D2-08** Edad: si el paciente tiene fecha de nacimiento, el servidor la calcula al crear la orden; si no, `edad_anios` es obligatoria.
+* **D2-09** Etiqueta provisional de los grupos de Inmunoserología: código humanizado + nombres de sus parámetros, hasta que exista metadata de grupos.
+* **D2-10** `numero_orden_paciente = MAX + 1` bajo bloqueo de la fila del paciente. Si se descarta la última orden, su número puede reutilizarse (son borradores privados; el folio sí es inviolable).
+* **D2-11** PENDIENTE antes de producción: auditoría de ediciones de pacientes (el esquema actual no tiene tabla ni acción para ello).
