@@ -1,0 +1,7 @@
+# docker-compose.override.yml
+# Exclusivo para desarrollo y ejecución de pruebas locales.
+# ADVERTENCIA: NO USAR EN PRODUCCIÓN. En producción, PostgreSQL no debe publicar ningún puerto.
+services:
+  db:
+    ports:
+      - "127.0.0.1:5432:5432"

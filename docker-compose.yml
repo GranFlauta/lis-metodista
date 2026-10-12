@@ -8,8 +8,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       # Solo se ejecutan al crear el volumen por primera vez (BD vacía).
@@ -37,8 +35,8 @@ services:
     environment:
       LIS_HOST: ${LIS_HOST}
     ports:
-      - "8080:80"
       - "8443:443"
+
     volumes:
       - caddy_data:/data # conserva la CA interna y los certificados
     depends_on:
