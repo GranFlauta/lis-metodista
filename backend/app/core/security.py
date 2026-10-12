@@ -27,6 +27,8 @@ from typing import Any
 import jwt
 from pwdlib import PasswordHash
 from pwdlib.hashers.argon2 import Argon2Hasher
+from pwdlib.exceptions import UnknownHashError, PwdlibError
+from argon2.exceptions import InvalidHash, InvalidHashError, VerifyMismatchError
 
 from app.core.clock import ahora
 from app.core.config import settings
@@ -38,7 +40,7 @@ JWT_ALGORITHM = "HS256"
 MIN_PASSWORD_LENGTH = 10
 MAX_PASSWORD_LENGTH = 128
 
-# Lista cerrada de contraseñas prohibidas (PROMPT_FASE_1.md §6.4)
+# Lista cerrada de contraseñas prohibidas (PROMPT_FASE_1.md §6.4 - 21 entradas)
 CLAVES_PROHIBIDAS = frozenset({
     "12345", "123456", "1234567", "12345678", "123456789", "1234567890",
     "0123456789", "password", "contraseña", "contrasena", "qwerty", "qwertyuiop",
@@ -49,8 +51,8 @@ CLAVES_PROHIBIDAS = frozenset({
 # Instancia de hasher configurada explícitamente con Argon2id
 password_hash = PasswordHash((Argon2Hasher(),))
 
-# Hash ficticio constante para mitigar ataques de temporización (timing attack) en login (§6.2)
-DUMMY_ARGON2_HASH = "$argon2id$v=19$m=65536,t=3,p=4$ZHVtbXlfc2FsdF8yMDI2$k8Y1/a4F3/wYJ5lQoZl7uQ"
+# Hash ficticio generado al importar el módulo para mitigar ataques de temporización (timing attack) en login (§6.2, G5)
+DUMMY_ARGON2_HASH = password_hash.hash(secrets.token_urlsafe(16))
 
 
 # -----------------------------------------------------------------------------
@@ -99,13 +101,13 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
     Verifica de forma segura si la contraseña en texto plano coincide con el hash Argon2id.
     Retorna False si los valores están vacíos o si el hash es inválido o no reconocido.
+    Acota excepciones a UnknownHashError e InvalidHashError para no silenciar errores inesperados (G5).
     """
     if not plain_password or not hashed_password:
         return False
     try:
         return password_hash.verify(plain_password, hashed_password)
-    except Exception:
-        # Previene caídas no controladas por hashes corruptos o cadenas arbitrarias
+    except (UnknownHashError, InvalidHash, InvalidHashError, ValueError):
         return False
 
 
@@ -129,6 +131,7 @@ def generate_temporary_password(
     """
     Genera una contraseña temporal segura de exactamente `length` caracteres aleatorios (por defecto 14).
     PROMPT_FASE_1.md §5: alfabeto sin caracteres ambiguos (0 O 1 l I).
+    Si tras los intentos ninguna candidata cumple la política, lanza excepción (G5).
     """
     if length < 10:
         raise ValueError("La longitud de la contraseña no puede ser inferior a 10 caracteres.")
@@ -163,7 +166,8 @@ def generate_temporary_password(
         if is_valid:
             return candidate
 
-    return candidate
+    raise PasswordPolicyError("No fue posible generar una contraseña temporal válida tras múltiples intentos.")
+
 
 
 # -----------------------------------------------------------------------------

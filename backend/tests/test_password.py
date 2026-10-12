@@ -103,6 +103,43 @@ class TestPasswordSecurity(unittest.TestCase):
                 f"Contiene caracteres ambiguos prohibidos: {encontrados} en '{temp}'",
             )
 
+    def test_05_dummy_argon2_hash_valido_y_lanza_mismatch(self):
+        """(a) Verificar contra DUMMY_ARGON2_HASH con argon2.PasswordHasher().verify lanza VerifyMismatchError."""
+        import argon2
+        from argon2.exceptions import VerifyMismatchError
+        from app.core.security import DUMMY_ARGON2_HASH
+
+        self.assertTrue(DUMMY_ARGON2_HASH.startswith("$argon2id$"))
+        hasher = argon2.PasswordHasher()
+        with self.assertRaises(VerifyMismatchError):
+            hasher.verify(DUMMY_ARGON2_HASH, "clave_cualquiera_erronea")
+
+    def test_06_login_usuario_inexistente_invoca_verificacion_ficticia(self):
+        """(b) Con usuario inexistente, el login sí invoca la verificación ficticia (contador sobre password_hash.verify)."""
+        from unittest.mock import patch
+        from fastapi.testclient import TestClient
+        from app.core.security import password_hash
+        from app.main import app
+
+        with patch.object(password_hash, "verify", wraps=password_hash.verify) as mock_verify:
+            client = TestClient(app)
+            resp = client.post("/api/auth/login", json={"usuario": "no_existo_999", "password": "Password123!"})
+            self.assertEqual(resp.status_code, 401)
+            self.assertGreaterEqual(mock_verify.call_count, 1, "No se invocó la verificación ficticia")
+
+    def test_07_cantidad_claves_prohibidas(self):
+        """(c) len(CLAVES_PROHIBIDAS) == 21."""
+        from app.core.security import CLAVES_PROHIBIDAS
+        self.assertEqual(len(CLAVES_PROHIBIDAS), 21)
+
+    def test_08_generate_temporary_password_lanza_excepcion_si_falla(self):
+        """generate_temporary_password lanza excepción si ninguna candidata cumple la política."""
+        from unittest.mock import patch
+        with patch("app.core.security.check_password_policy", return_value=(False, "Invalida")):
+            with self.assertRaises(PasswordPolicyError):
+                generate_temporary_password(14)
+
 
 if __name__ == "__main__":
     unittest.main()
+

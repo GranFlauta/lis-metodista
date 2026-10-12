@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.api import auth, usuarios
 from app.core.errors import register_error_handlers
@@ -10,8 +11,12 @@ app = FastAPI(
     redoc_url=None,
 )
 
+# Resolver IP del cliente desde el proxy inverso (Caddy) en request.client.host
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+
 # Registrar manejadores de excepciones para formato {"codigo": "...", "mensaje": "..."}
 register_error_handlers(app)
+
 
 # Healthcheck
 @app.get("/api/health")
