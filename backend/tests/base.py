@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import os
 import unittest
-from datetime import datetime
-from typing import Generator
+from datetime import date, datetime
+from typing import Any, Generator
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
@@ -25,6 +25,8 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_password_hash
 from app.main import app
+from app.models.order import BorradorDescartado, Orden, OrdenEstudio, OrdenEstudioGrupo
+from app.models.patient import Paciente
 from app.models.session import LogSeguridad, Sesion
 from app.models.user import Rol, Usuario
 
@@ -105,7 +107,12 @@ class IntegrationTestCase(unittest.TestCase):
         reset_clock()
         self.db = TestingSessionLocal()
 
-        # Limpiar datos transaccionales entre pruebas
+        # Limpiar datos transaccionales entre pruebas en orden estricto de dependencias
+        self.db.query(BorradorDescartado).delete()
+        self.db.query(OrdenEstudioGrupo).delete()
+        self.db.query(OrdenEstudio).delete()
+        self.db.query(Orden).delete()
+        self.db.query(Paciente).delete()
         self.db.query(LogSeguridad).delete()
         self.db.query(Sesion).delete()
         self.db.query(Usuario).delete()
@@ -160,3 +167,43 @@ class IntegrationTestCase(unittest.TestCase):
         self.db.commit()
         self.db.refresh(u)
         return u
+
+    def crear_paciente_test(
+        self,
+        ci: str | None = "1000001",
+        ci_complemento: str | None = None,
+        sin_ci: bool = False,
+        nombres: str = "Paciente",
+        apellido_paterno: str = "Prueba",
+        apellido_materno: str | None = "Clinico",
+        fecha_nacimiento: Any | None = None,
+        sexo: str = "M",
+        telefono: str | None = "71234567",
+        creado_por: int | None = None,
+    ) -> Paciente:
+        """Crea un paciente ficticio para pruebas."""
+        import secrets
+        from app.core.clock import ahora
+
+        if creado_por is None:
+            u = self.crear_usuario_test(usuario=f"bio_{secrets.token_hex(4)}", rol="BIOQUIMICO")
+            creado_por = u.id_usuario
+
+        p = Paciente(
+            ci=ci,
+            ci_complemento=ci_complemento,
+            sin_ci=sin_ci,
+            nombres=nombres,
+            apellido_paterno=apellido_paterno,
+            apellido_materno=apellido_materno,
+            fecha_nacimiento=fecha_nacimiento,
+            sexo=sexo,
+            telefono=telefono,
+            creado_por=creado_por,
+            creado_en=ahora(),
+            actualizado_en=ahora(),
+        )
+        self.db.add(p)
+        self.db.commit()
+        self.db.refresh(p)
+        return p

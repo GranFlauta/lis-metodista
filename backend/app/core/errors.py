@@ -84,8 +84,8 @@ class NoEncontradoError(AppError):
 
 
 class ConflictoError(AppError):
-    def __init__(self, mensaje: str = "Dato duplicado o en conflicto.") -> None:
-        super().__init__(status.HTTP_409_CONFLICT, "CONFLICTO", mensaje)
+    def __init__(self, mensaje: str = "Dato duplicado o en conflicto.", extra: dict[str, Any] | None = None) -> None:
+        super().__init__(status.HTTP_409_CONFLICT, "CONFLICTO", mensaje, extra)
 
 
 class PasswordDebilError(AppError):

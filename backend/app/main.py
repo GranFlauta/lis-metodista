@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-from app.api import auth, catalogo, usuarios
+from app.api import auth, catalogo, pacientes, usuarios
 from app.core.errors import register_error_handlers
 
 app = FastAPI(
@@ -27,3 +27,4 @@ def health() -> dict:
 app.include_router(auth.router)
 app.include_router(usuarios.router)
 app.include_router(catalogo.router)
+app.include_router(pacientes.router)
