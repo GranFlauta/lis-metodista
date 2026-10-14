@@ -324,7 +324,7 @@ def create_access_token(
 def decode_access_token(token: str) -> dict[str, Any]:
     """
     Decodifica y valida un token de acceso JWT.
-    Verifica firma con settings.jwt_secret y comprueba expiración.
+    Verifica firma con settings.jwt_secret y comprueba expiración usando ahora().
     """
     if not token:
         raise TokenInvalidError("El token no puede estar vacío.")
@@ -334,12 +334,16 @@ def decode_access_token(token: str) -> dict[str, Any]:
             token,
             settings.jwt_secret,
             algorithms=[JWT_ALGORITHM],
+            options={"verify_exp": False},
         )
-        return payload
-    except jwt.ExpiredSignatureError as exc:
-        raise TokenExpiredError("El token de acceso ha expirado.") from exc
     except jwt.PyJWTError as exc:
         raise TokenInvalidError("El token de acceso no es válido o está malformado.") from exc
+
+    exp = payload.get("exp")
+    if exp is not None and ahora().timestamp() > exp:
+        raise TokenExpiredError("El token de acceso ha expirado.")
+
+    return payload
 
 
 # -----------------------------------------------------------------------------

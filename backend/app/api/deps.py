@@ -23,6 +23,7 @@ from app.core.errors import (
 from app.core.security import decode_access_token, TokenExpiredError, TokenInvalidError
 from app.models.session import LogSeguridad, Sesion
 from app.models.user import Usuario
+from app.services.sesion_config_service import obtener_config_sesion
 
 # Rutas exentas de bloqueo cuando debe_cambiar_password = TRUE (§6.1)
 WHITELIST_CAMBIO_PASSWORD = (
@@ -123,8 +124,9 @@ def require_auth(
     if not sesion:
         raise SesionExpiradaError("Sesión no encontrada.")
 
-    # Comprobar regla de sesión viva (§5)
-    # revocada_en IS NULL y ahora < expira_en y ahora - ultimo_latido <= 150s y ahora - ultima_actividad <= 30m
+    # Comprobar regla de sesión viva (§5, T5)
+    # revocada_en IS NULL y ahora < expira_en y ahora - ultimo_latido <= sesion_muerta_tras_seg y ahora - ultima_actividad <= sesion_inactividad_min
+    config_sesion = obtener_config_sesion(db)
     esta_viva = True
     motivo_muerte: str | None = None
 
@@ -135,17 +137,17 @@ def require_auth(
         esta_viva = False
         motivo_muerte = "Tope absoluto de sesión alcanzado."
     else:
-        # Validar latido (session_dead_after_seconds = 150)
+        # Validar latido (sesion_muerta_tras_seg)
         ultimo_latido_tz = sesion.ultimo_latido.replace(tzinfo=now.tzinfo) if sesion.ultimo_latido.tzinfo is None else sesion.ultimo_latido
-        if (now - ultimo_latido_tz).total_seconds() > settings.session_dead_after_seconds:
+        if (now - ultimo_latido_tz).total_seconds() > config_sesion.muerta_tras_seg:
             esta_viva = False
-            motivo_muerte = f"Sin latido por más de {settings.session_dead_after_seconds} segundos."
+            motivo_muerte = f"Sin latido por más de {config_sesion.muerta_tras_seg} segundos."
         else:
-            # Validar inactividad (idle_timeout_minutes = 30)
+            # Validar inactividad (sesion_inactividad_min)
             ultima_act_tz = sesion.ultima_actividad.replace(tzinfo=now.tzinfo) if sesion.ultima_actividad.tzinfo is None else sesion.ultima_actividad
-            if (now - ultima_act_tz).total_seconds() > (settings.idle_timeout_minutes * 60):
+            if (now - ultima_act_tz).total_seconds() > (config_sesion.inactividad_min * 60):
                 esta_viva = False
-                motivo_muerte = f"Inactividad mayor a {settings.idle_timeout_minutes} minutos."
+                motivo_muerte = f"Inactividad mayor a {config_sesion.inactividad_min} minutos."
 
     if not esta_viva:
         if sesion.revocada_en is None:

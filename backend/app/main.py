@@ -27,6 +27,7 @@ def health() -> dict:
 
 # Routers de la Fase 1, 2 y 3
 app.include_router(auth.router)
+app.include_router(auth.admin_config_router)
 app.include_router(usuarios.router)
 app.include_router(catalogo.router)
 app.include_router(pacientes.router)

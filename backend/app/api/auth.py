@@ -17,13 +17,14 @@ import math
 from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, Request, Response, status
+from fastapi import APIRouter, Body, Depends, Header, Request, Response, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
     obtener_ip_cliente,
     registrar_evento_seguridad,
+    require_admin,
     require_auth,
 )
 from app.core.clock import ahora
@@ -45,14 +46,28 @@ from app.core.security import (
     verify_dummy_password,
     verify_password,
 )
+from app.models.result import LaboratorioConfig
 from app.models.session import Sesion
 from app.models.user import Usuario
 from app.schemas.auth import (
     CambiarPasswordRequest,
+    ConfigSesionResumenResponse,
+    HeartbeatRequest,
+    HeartbeatResponse,
     LoginRequest,
     MeResponse,
+    SesionConfigResponse,
+    SesionConfigUpdateRequest,
     TokenResponse,
     UsuarioResumenResponse,
+)
+from app.services.sesion_config_service import (
+    CLAVE_INACTIVIDAD,
+    CLAVE_INTERVALO,
+    CLAVE_MUERTA,
+    CLAVE_TOPE,
+    invalidar_cache_config_sesion,
+    obtener_config_sesion,
 )
 
 REFRESH_COOKIE_NAME = "refresh_token"
@@ -171,9 +186,10 @@ def login(
         detalle={"user_agent": request.headers.get("user-agent")},
     )
 
-    # Crear fila en sesiones (expira_en = ahora + ABSOLUTE_SESSION_HOURS)
+    # Crear fila en sesiones (expira_en = ahora + sesion_tope_absoluto_horas)
     raw_refresh_token, refresh_hash = generate_refresh_token()
-    expira_en = now + timedelta(hours=settings.absolute_session_hours)
+    config_sesion = obtener_config_sesion(db)
+    expira_en = now + timedelta(hours=config_sesion.tope_absoluto_horas)
 
     sesion = Sesion(
         id_usuario=usuario_db.id_usuario,
@@ -224,6 +240,10 @@ def login(
         expires_in=settings.access_token_minutes * 60,
         debe_cambiar_password=usuario_db.debe_cambiar_password,
         usuario=usuario_resumen,
+        config_sesion=ConfigSesionResumenResponse(
+            intervalo_latido_seg=config_sesion.intervalo_latido_seg,
+            inactividad_min=config_sesion.inactividad_min,
+        ),
     )
 
 
@@ -253,7 +273,8 @@ def refresh_token(
 
     sesion = db.query(Sesion).filter(Sesion.refresh_hash == ref_hash).first()
 
-    # Validar sesión viva (§5)
+    # Validar sesión viva (§5, T5)
+    config_sesion = obtener_config_sesion(db)
     esta_viva = True
     if not sesion or sesion.revocada_en is not None:
         esta_viva = False
@@ -261,11 +282,11 @@ def refresh_token(
         esta_viva = False
     else:
         ultimo_latido_tz = sesion.ultimo_latido.replace(tzinfo=now.tzinfo) if sesion.ultimo_latido.tzinfo is None else sesion.ultimo_latido
-        if (now - ultimo_latido_tz).total_seconds() > settings.session_dead_after_seconds:
+        if (now - ultimo_latido_tz).total_seconds() > config_sesion.muerta_tras_seg:
             esta_viva = False
         else:
             ultima_act_tz = sesion.ultima_actividad.replace(tzinfo=now.tzinfo) if sesion.ultima_actividad.tzinfo is None else sesion.ultima_actividad
-            if (now - ultima_act_tz).total_seconds() > (settings.idle_timeout_minutes * 60):
+            if (now - ultima_act_tz).total_seconds() > (config_sesion.inactividad_min * 60):
                 esta_viva = False
 
     if not esta_viva:
@@ -320,25 +341,49 @@ def refresh_token(
         expires_in=settings.access_token_minutes * 60,
         debe_cambiar_password=usuario.debe_cambiar_password,
         usuario=usuario_resumen,
+        config_sesion=ConfigSesionResumenResponse(
+            intervalo_latido_seg=config_sesion.intervalo_latido_seg,
+            inactividad_min=config_sesion.inactividad_min,
+        ),
     )
 
 
 @router.post(
     "/heartbeat",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=HeartbeatResponse,
+    status_code=status.HTTP_200_OK,
     summary="Registrar latido (Heartbeat)",
-    description="Actualiza solo ultimo_latido de la sesión. Responde 204 No Content.",
+    description="Actualiza ultimo_latido y, si actividad=true, ultima_actividad. Responde 200 con intervalo y segundos restantes.",
 )
 def heartbeat(
     request: Request,
+    body: HeartbeatRequest | None = Body(default=None),
     current_user: Usuario = Depends(require_auth),
     db: Session = Depends(get_db),
-) -> None:
+) -> HeartbeatResponse:
     # require_auth ya validó token y sesión viva
     sesion: Sesion | None = getattr(request.state, "sesion_actual", None)
-    if sesion:
-        sesion.ultimo_latido = ahora()
-        db.commit()
+    if not sesion:
+        raise SesionExpiradaError("Sesión no encontrada.")
+
+    now = ahora()
+    actividad = body.actividad if body is not None else False
+
+    sesion.ultimo_latido = now
+    if actividad:
+        sesion.ultima_actividad = now
+    db.commit()
+
+    config_sesion = obtener_config_sesion(db)
+    limite_inactividad_seg = config_sesion.inactividad_min * 60
+    ultima_act_tz = sesion.ultima_actividad.replace(tzinfo=now.tzinfo) if sesion.ultima_actividad.tzinfo is None else sesion.ultima_actividad
+    segundos_inactivo = (now - ultima_act_tz).total_seconds()
+    segundos_restantes = max(0, int(limite_inactividad_seg - segundos_inactivo))
+
+    return HeartbeatResponse(
+        intervalo_latido_seg=config_sesion.intervalo_latido_seg,
+        segundos_restantes_inactividad=segundos_restantes,
+    )
 
 
 @router.post(
@@ -463,3 +508,145 @@ def cambiar_password(
         detalle={"motivo": "Cambio de contraseña exitoso"},
     )
     db.commit()
+
+
+# -----------------------------------------------------------------------------
+# Endpoints de Configuración de Sesión (solo ADMIN) (D35-02 / T5)
+# -----------------------------------------------------------------------------
+
+admin_config_router = APIRouter(prefix="/api/admin/configuracion", tags=["Configuración Admin"])
+
+
+@admin_config_router.get(
+    "/sesion",
+    response_model=SesionConfigResponse,
+    summary="Consultar configuración de sesión (solo ADMIN)",
+    description="Devuelve los 4 parámetros vigentes de sesión configurados en laboratorio_config.",
+)
+def get_config_sesion(
+    current_user: Usuario = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> SesionConfigResponse:
+    cfg = obtener_config_sesion(db)
+    return SesionConfigResponse(
+        sesion_intervalo_latido_seg=cfg.intervalo_latido_seg,
+        sesion_muerta_tras_seg=cfg.muerta_tras_seg,
+        sesion_inactividad_min=cfg.inactividad_min,
+        sesion_tope_absoluto_horas=cfg.tope_absoluto_horas,
+    )
+
+
+@admin_config_router.put(
+    "/sesion",
+    response_model=SesionConfigResponse,
+    summary="Modificar configuración de sesión (solo ADMIN)",
+    description="Valida rangos según D35-02, actualiza laboratorio_config, invalida caché y audita.",
+)
+def put_config_sesion(
+    body: SesionConfigUpdateRequest,
+    request: Request,
+    current_user: Usuario = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> SesionConfigResponse:
+    intervalo = body.sesion_intervalo_latido_seg
+    muerta = body.sesion_muerta_tras_seg
+    inactividad = body.sesion_inactividad_min
+    tope = body.sesion_tope_absoluto_horas
+
+    if intervalo is None or muerta is None or inactividad is None or tope is None:
+        raise ValidacionError("Faltan campos obligatorios en la configuración de sesión.")
+
+    # Validaciones de rango (D35-02 / Test 5):
+    # - Intervalo de latido: 10–120 s
+    if intervalo < 10 or intervalo > 120:
+        raise ValidacionError(
+            f"El intervalo de latido debe estar entre 10 y 120 segundos (sesion_intervalo_latido_seg: [10, 120]). Recibido: {intervalo}"
+        )
+
+    # - Sesión muerta sin latido: >= 3x intervalo y <= 1800 s
+    min_muerta = 3 * intervalo
+    if muerta < min_muerta or muerta > 1800:
+        raise ValidacionError(
+            f"El tiempo de sesión muerta sin latido debe ser >= 3× el intervalo ({min_muerta} s) y <= 1800 s (sesion_muerta_tras_seg: [{min_muerta}, 1800]). Recibido: {muerta}"
+        )
+
+    # - Inactividad: 5–480 min
+    if inactividad < 5 or inactividad > 480:
+        raise ValidacionError(
+            f"El tiempo de inactividad debe estar entre 5 y 480 minutos (sesion_inactividad_min: [5, 480]). Recibido: {inactividad}"
+        )
+
+    # - Tope absoluto: 1–24 h
+    if tope < 1 or tope > 24:
+        raise ValidacionError(
+            f"El tope absoluto de sesión debe estar entre 1 y 24 horas (sesion_tope_absoluto_horas: [1, 24]). Recibido: {tope}"
+        )
+
+    # Leer valores antes de guardar (usando fallback de settings si no existen en BD)
+    filas = db.query(LaboratorioConfig).filter(LaboratorioConfig.clave.in_([
+        CLAVE_INTERVALO, CLAVE_MUERTA, CLAVE_INACTIVIDAD, CLAVE_TOPE
+    ])).all()
+    mapa_db = {f.clave: f.valor for f in filas}
+
+    def _val_antes(clave: str, def_val: int) -> int:
+        raw = mapa_db.get(clave)
+        if raw is None:
+            return def_val
+        try:
+            return int(str(raw).strip())
+        except (ValueError, TypeError):
+            return def_val
+
+    antes = {
+        CLAVE_INTERVALO: _val_antes(CLAVE_INTERVALO, settings.heartbeat_interval_seconds),
+        CLAVE_MUERTA: _val_antes(CLAVE_MUERTA, settings.session_dead_after_seconds),
+        CLAVE_INACTIVIDAD: _val_antes(CLAVE_INACTIVIDAD, settings.idle_timeout_minutes),
+        CLAVE_TOPE: _val_antes(CLAVE_TOPE, settings.absolute_session_hours),
+    }
+    despues = {
+        CLAVE_INTERVALO: intervalo,
+        CLAVE_MUERTA: muerta,
+        CLAVE_INACTIVIDAD: inactividad,
+        CLAVE_TOPE: tope,
+    }
+
+    # Guardar en laboratorio_config
+    ahora_ts = ahora()
+    nuevos_valores = [
+        (CLAVE_INTERVALO, str(intervalo)),
+        (CLAVE_MUERTA, str(muerta)),
+        (CLAVE_INACTIVIDAD, str(inactividad)),
+        (CLAVE_TOPE, str(tope)),
+    ]
+    for clave, val_str in nuevos_valores:
+        fila = db.query(LaboratorioConfig).filter(LaboratorioConfig.clave == clave).first()
+        if fila:
+            fila.valor = val_str
+            fila.actualizado_en = ahora_ts
+        else:
+            db.add(LaboratorioConfig(clave=clave, valor=val_str, actualizado_en=ahora_ts))
+
+    # Registrar evento CONFIG_SESION_EDITADA con detalle {campo: {antes, despues}}
+    detalle = {
+        clave: {"antes": antes[clave], "despues": despues[clave]}
+        for clave in [CLAVE_INTERVALO, CLAVE_MUERTA, CLAVE_INACTIVIDAD, CLAVE_TOPE]
+    }
+    registrar_evento_seguridad(
+        db=db,
+        accion="CONFIG_SESION_EDITADA",
+        id_usuario=current_user.id_usuario,
+        id_objetivo=None,
+        ip=obtener_ip_cliente(request),
+        detalle=detalle,
+    )
+    db.commit()
+
+    # Invalidar caché en memoria
+    invalidar_cache_config_sesion()
+
+    return SesionConfigResponse(
+        sesion_intervalo_latido_seg=intervalo,
+        sesion_muerta_tras_seg=muerta,
+        sesion_inactividad_min=inactividad,
+        sesion_tope_absoluto_horas=tope,
+    )

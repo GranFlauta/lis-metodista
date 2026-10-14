@@ -32,6 +32,7 @@ from app.models.result import ResultadoBorrador
 from app.models.patient import Paciente
 from app.models.session import LogSeguridad, Sesion
 from app.models.user import Rol, Usuario
+from app.services.sesion_config_service import invalidar_cache_config_sesion
 
 
 def validar_database_url_test(url: str | None) -> str:
@@ -203,7 +204,19 @@ class IntegrationTestCase(unittest.TestCase):
         self.db.query(LogSeguridad).delete()
         self.db.query(Sesion).delete()
         self.db.query(Usuario).delete()
+
+        # Resetear configuración de sesión por defecto y su caché (D35-02 / T4 / T5)
+        self.db.execute(text("""
+            INSERT INTO laboratorio.laboratorio_config (clave, valor)
+            VALUES 
+                ('sesion_intervalo_latido_seg', '30'),
+                ('sesion_muerta_tras_seg', '150'),
+                ('sesion_inactividad_min', '30'),
+                ('sesion_tope_absoluto_horas', '12')
+            ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor
+        """))
         self.db.commit()
+        invalidar_cache_config_sesion()
 
         def override_get_db() -> Generator[Session, None, None]:
             db_session = session_factory()
@@ -216,6 +229,7 @@ class IntegrationTestCase(unittest.TestCase):
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
+        invalidar_cache_config_sesion()
         self.db.close()
         app.dependency_overrides.clear()
         reset_clock()

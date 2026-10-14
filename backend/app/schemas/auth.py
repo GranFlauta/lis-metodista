@@ -179,15 +179,74 @@ class UsuarioResponse(BaseModel):
         return " ".join(partes)
 
 
+class ConfigSesionResumenResponse(BaseModel):
+    """Resumen de configuración de sesión devuelto en login y refresh (D35-02 / T5)."""
+    intervalo_latido_seg: int = Field(..., description="Intervalo recomendado entre latidos en segundos.")
+    inactividad_min: int = Field(..., description="Minutos permitidos de inactividad antes de expirar.")
+
+
 class TokenResponse(BaseModel):
     """
-    Respuesta exitosa de autenticación con token JWT de acceso (§6.2).
+    Respuesta exitosa de autenticación con token JWT de acceso (§6.2, T5).
     """
     access_token: str = Field(..., description="Token de acceso JWT firmado.")
     token_type: str = Field(default="bearer", description="Tipo de autorización HTTP (bearer).")
     expires_in: int = Field(..., description="Tiempo de vigencia del token de acceso en segundos.")
     debe_cambiar_password: bool = Field(..., description="Informa si debe forzarse el cambio de clave.")
     usuario: UsuarioResumenResponse = Field(..., description="Detalles del usuario autenticado.")
+    config_sesion: ConfigSesionResumenResponse = Field(..., description="Configuración de tiempos de sesión.")
+
+
+# -----------------------------------------------------------------------------
+# 3.1 Esquemas de Latido (Heartbeat) y Configuración de Sesión (T5)
+# -----------------------------------------------------------------------------
+
+class HeartbeatRequest(BaseModel):
+    """Cuerpo opcional para POST /api/auth/heartbeat (ausente = actividad False)."""
+    actividad: bool = Field(default=False, description="True si hubo interacción real del usuario.")
+
+
+class HeartbeatResponse(BaseModel):
+    """Respuesta para POST /api/auth/heartbeat."""
+    intervalo_latido_seg: int = Field(..., description="Intervalo recomendado para el siguiente latido en segundos.")
+    segundos_restantes_inactividad: int = Field(..., description="Segundos restantes antes de expiración por inactividad.")
+
+
+class SesionConfigResponse(BaseModel):
+    """Respuesta de configuración de sesión para el Administrador (GET y PUT)."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    sesion_intervalo_latido_seg: int = Field(..., alias="intervalo_latido_seg")
+    sesion_muerta_tras_seg: int = Field(..., alias="muerta_tras_seg")
+    sesion_inactividad_min: int = Field(..., alias="inactividad_min")
+    sesion_tope_absoluto_horas: int = Field(..., alias="tope_absoluto_horas")
+
+
+class SesionConfigUpdateRequest(BaseModel):
+    """Cuerpo para actualización de tiempos de sesión por el Administrador (PUT)."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    sesion_intervalo_latido_seg: int | None = Field(default=None, alias="intervalo_latido_seg")
+    sesion_muerta_tras_seg: int | None = Field(default=None, alias="muerta_tras_seg")
+    sesion_inactividad_min: int | None = Field(default=None, alias="inactividad_min")
+    sesion_tope_absoluto_horas: int | None = Field(default=None, alias="tope_absoluto_horas")
+
+    @model_validator(mode="before")
+    @classmethod
+    def resolver_alias_prefijo(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            mapeo = {
+                "intervalo_latido_seg": "sesion_intervalo_latido_seg",
+                "muerta_tras_seg": "sesion_muerta_tras_seg",
+                "inactividad_min": "sesion_inactividad_min",
+                "tope_absoluto_horas": "sesion_tope_absoluto_horas",
+            }
+            for corto, largo in mapeo.items():
+                if largo in data and corto not in data:
+                    data[corto] = data[largo]
+                elif corto in data and largo not in data:
+                    data[largo] = data[corto]
+        return data
 
 
 # -----------------------------------------------------------------------------
