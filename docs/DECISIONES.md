@@ -199,3 +199,11 @@ Congela todo lo necesario para reimprimir idéntico aunque el catálogo cambie:
 * **D3-09** Guardar resultados NO modifica `ordenes.fila_version` (esa versión protege solo la cabecera). Dos pestañas del mismo autor = última escritura gana por parámetro; cada escritura bloquea la fila de la orden (`FOR UPDATE`).
 * **D3-10** La API usa el punto decimal como formato canónico. La interfaz muestra según `laboratorio_config.separador_decimal` (hoy sembrado en coma). La decisión de negocio sobre el separador sigue pendiente (§10, punto 9).
 * **D3-11** PENDIENTE: valores críticos y límites fisiológicos (p. ej. % > 100); permitir reemplazar GR/Hb estimados por valor medido (v1.1).
+
+## 13. Decisiones de Fase 3.5 (correcciones)
+
+* **D35-01** No hay CORS: frontend y API comparten origen (Caddy en producción, proxy de Vite en desarrollo). No se sirve el frontend desde el backend. `/docs` y `/openapi.json` están desactivados salvo `ENABLE_DOCS=true`.
+* **D35-02** El tiempo de sesión lo configura el ADMIN en `laboratorio_config`: intervalo de latido (10–120 s), sesión muerta sin latido (≥ 3× el intervalo y ≤ 1800 s), inactividad (5–480 min) y tope absoluto (1–24 h). Los valores por defecto siguen siendo 30 s / 150 s / 30 min / 12 h. El tope absoluto se aplica a sesiones nuevas.
+* **D35-03** La inactividad se mide con **actividad real del usuario** (ratón, teclado, toque, desplazamiento) que el navegador comunica en el latido (`actividad: true`). Un latido sin actividad NO renueva la inactividad.
+* **D35-04** Los tests solo corren contra bases cuyo nombre termina en `_test`.
+* **D35-05** Los cambios de esquema de esta fase se hacen con la migración Alembic `0002`. El contenedor del backend ejecuta `alembic upgrade head` al arrancar.
