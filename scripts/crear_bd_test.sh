@@ -25,4 +25,22 @@ $CONTAINER_CLI compose exec -T db psql -U "$PG_USER" -d "$TEST_DB" < db/init/001
 echo "[$CONTAINER_CLI] Aplicando db/init/002_seed_catalogo.sql en '$TEST_DB'..."
 $CONTAINER_CLI compose exec -T db psql -U "$PG_USER" -d "$TEST_DB" < db/init/002_seed_catalogo.sql > /dev/null
 
-echo "[$CONTAINER_CLI] OK: Base de datos '$TEST_DB' recreada exitosamente con esquema y catálogo."
+echo "[$CONTAINER_CLI] Aplicando migraciones Alembic (upgrade head) en '$TEST_DB'..."
+if [ -f .env ]; then
+    PG_PASSWORD=$(grep '^POSTGRES_PASSWORD=' .env | cut -d '=' -f2- | tr -d '\r"')
+fi
+PG_PASSWORD="${PG_PASSWORD:-CAMBIAR_por_una_clave_larga_y_aleatoria}"
+
+TEST_DB_URL="postgresql+psycopg://${PG_USER}:${PG_PASSWORD}@127.0.0.1:5432/${TEST_DB}"
+
+if [ -f .venv/bin/alembic ]; then
+    (cd backend && DATABASE_URL="$TEST_DB_URL" ../.venv/bin/alembic upgrade head)
+elif [ -f backend/venv/bin/alembic ]; then
+    (cd backend && DATABASE_URL="$TEST_DB_URL" ./venv/bin/alembic upgrade head)
+elif command -v alembic >/dev/null 2>&1; then
+    (cd backend && DATABASE_URL="$TEST_DB_URL" alembic upgrade head)
+else
+    $CONTAINER_CLI compose exec -T -e DATABASE_URL="postgresql+psycopg://${PG_USER}:${PG_PASSWORD}@db:5432/${TEST_DB}" backend alembic upgrade head
+fi
+
+echo "[$CONTAINER_CLI] OK: Base de datos '$TEST_DB' recreada exitosamente con esquema, catálogo y migraciones."

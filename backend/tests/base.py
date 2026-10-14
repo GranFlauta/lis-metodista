@@ -156,7 +156,25 @@ class IntegrationTestCase(unittest.TestCase):
                     "Ejecute 'scripts/crear_bd_test.sh' para aplicar 001_schema.sql en la BD de pruebas."
                 )
 
-        # 3. Sembrar roles básicos si no existen
+            # Verificar las 4 claves de configuración de sesión (D35-02 / T4)
+            claves_sesion_requeridas = {
+                "sesion_intervalo_latido_seg",
+                "sesion_muerta_tras_seg",
+                "sesion_inactividad_min",
+                "sesion_tope_absoluto_horas",
+            }
+            res_cfg = conn.execute(text(
+                "SELECT clave FROM laboratorio.laboratorio_config WHERE clave LIKE 'sesion_%'"
+            ))
+            claves_existentes = {row[0] for row in res_cfg}
+            claves_faltantes = claves_sesion_requeridas - claves_existentes
+            if claves_faltantes:
+                raise AssertionError(
+                    f"Faltan claves de configuración de sesión en 'laboratorio_config': {sorted(claves_faltantes)}. "
+                    "Ejecute 'alembic upgrade head' en la BD de pruebas (migración 0002_config_sesion)."
+                )
+
+        # 4. Sembrar roles básicos si no existen
         with session_factory() as session:
             admin_rol = session.query(Rol).filter(Rol.nombre == "ADMIN").first()
             if not admin_rol:

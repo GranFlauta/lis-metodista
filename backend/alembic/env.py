@@ -1,3 +1,4 @@
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -15,8 +16,9 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Overwrite sqlalchemy.url dynamically with application settings
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# Overwrite sqlalchemy.url dynamically with application settings or environment override
+db_url = os.environ.get("DATABASE_URL") or settings.database_url
+config.set_main_option("sqlalchemy.url", db_url)
 
 target_metadata = Base.metadata
 
