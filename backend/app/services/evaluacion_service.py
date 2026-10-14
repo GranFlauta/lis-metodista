@@ -516,7 +516,7 @@ def evaluar_captura_orden(
                     if p.tipo_campo == "NUMERICO":
                         try:
                             v_num = a_decimal(p.valor_defecto)
-                        except Exception:
+                        except ValueError:
                             v_num = None
                 else:
                     valor_final_str = None

@@ -3,35 +3,38 @@
 Servidor local (on-premise): **PostgreSQL 16 + FastAPI + React/Vite + Caddy (HTTPS)** con Podman / Docker Compose.
 Las reglas de negocio y todas las decisiones están en **[docs/DECISIONES.md](docs/DECISIONES.md)** (léelo primero).
 
-## Estado: Fase 1 (Completada)
+## Estado: Fase 3.5 (En curso)
 
-- **Listo (Fase 0 y Fase 1)**:
+- **Listo (Fases 0 a 3)** — tag `fase-3-cerrada`:
   - Esquema de base de datos (`001_schema.sql`) con bajas lógicas y auditoría.
-  - Catálogo de 9 estudios y 2 perfiles con motor de cálculo determinista.
-  - Autenticación criptográfica con Argon2id y política estricta de contraseñas.
-  - Sesiones por latido clínico cada 30 s con access tokens en memoria y cookies de refresco `SameSite=Strict`.
-  - API REST de autenticación y gestión de usuarios (`ADMIN`).
-  - Frontend SPA en React + Vite + TypeScript (Login, Cambio obligatorio de clave, Gestión de usuarios).
-  - Comando CLI `crear-admin` y baseline de Alembic (`0001_baseline.py`).
-  - Suite de 52 tests automatizados pasando al 100%.
-- **Pendiente (Fases 2 en adelante)**:
-  - Órdenes, pacientes, folios, carga de resultados, firmas e informes PDF (ver `docs/DECISIONES.md §9`).
+  - Catálogo de 9 estudios y 2 perfiles con motor de cálculo determinista (sin `eval`, `Decimal`).
+  - Autenticación Argon2id, sesiones por latido con access token en memoria y refresh en cookie `HttpOnly` `SameSite=Strict`.
+  - Gestión de usuarios (`ADMIN`) y CLI `crear-admin`.
+  - Pacientes, órdenes en borrador y detección de trabajo duplicado (Fase 2).
+  - Captura de resultados, cálculo en vivo, banderas por sexo/edad, reglas cruzadas y completitud (Fase 3).
+  - Suite de **119 tests** (`unittest`) pasando contra PostgreSQL real, sin `skipped`.
+- **En curso (Fase 3.5)**: endurecimiento de red (sin CORS ni ngrok), guarda de BD de pruebas, sesión configurable por el ADMIN con actividad real del usuario. Ver `PROMPT_FASE_3_5_CORRECCIONES.md` y `docs/DECISIONES.md §13`.
+- **Siguiente (Fase 3.6)**: rediseño UX fiel a Excel según `docs/UX_GUIDE.md` (`PROMPT_FASE_3_6_UX.md`).
+- **Pendiente (Fases 4+)**: publicación con folio, PDF oficial, versiones, delegación (ver `docs/DECISIONES.md §9`).
 
 ## Estructura del Proyecto
 
 ```
 db/init/001_schema.sql          Esquema (tablas, índices, triggers de inmutabilidad, folios)
 db/init/002_seed_catalogo.sql   GENERADO desde definitions.py — no editar a mano
-backend/alembic/                Configuración de Alembic y 0001_baseline.py vacía
-backend/app/api/                Endpoints de auth y usuarios (FastAPI)
+backend/alembic/                Migraciones Alembic (0001_baseline.py = línea base)
+backend/app/api/                Endpoints: auth, usuarios, pacientes, ordenes, catalogo, resultados
+backend/app/services/           evaluacion_service.py (cálculo, banderas, reglas, completitud)
 backend/app/calculation/        Motor de fórmulas (sin eval, Decimal)
 backend/app/catalog/            definitions.py = fuente única del catálogo
 backend/app/core/               clock.py (reloj determinista), errors.py, security.py, config.py
 backend/app/cli.py              CLI para crear administrador inicial
-backend/tests/                  Suite de tests (52 tests con unittest)
+backend/tests/                  Suite de 119 tests (unittest, PostgreSQL real)
 frontend/src/api/               Cliente HTTP con Bearer en memoria y reintento de refresh
-frontend/src/features/auth/     AuthProvider, Login, Cambio de contraseña, RutaProtegida
-frontend/src/features/admin/    Administración de usuarios (solo ADMIN)
+frontend/src/features/          auth, admin, home, pacientes, ordenes, ...
+scripts/                        crear_bd_test.sh, backup.sh, restaurar.sh, generar_seed_sql.py
+docs/                           DECISIONES, SUPUESTOS, UX_GUIDE, CONTEXTO_PROYECTO
+docs/historial/                 Prompts, evaluaciones y evidencias de fases cerradas
 docker-compose.yml  .env.example
 ```
 
@@ -60,23 +63,36 @@ podman exec -it lis_backend_1 python -m app.cli crear-admin
 
 ## Ejecución de Tests
 
-La suite completa consta de 52 pruebas (25 de cálculo/catálogo + 27 de seguridad/autenticación/usuarios).
+La suite completa consta de **119 pruebas**:
+
+| Archivo | Tests |
+|---|---|
+| `test_calculo_y_catalogo.py` | 25 |
+| `test_ordenes.py` | 25 |
+| `test_resultados_api.py` | 16 |
+| `test_evaluacion.py` | 11 |
+| `test_sesion.py` | 9 |
+| `test_pacientes.py` | 8 |
+| `test_password.py` | 8 |
+| `test_usuarios.py` | 8 |
+| `test_login.py` | 6 |
+| `test_catalogo_api.py` | 3 |
 
 ```bash
-# A) Tests unitarios (sin requerir base de datos)
+# A) Tests unitarios (sin base de datos)
 cd backend
 ./venv/bin/python -m unittest tests/test_calculo_y_catalogo.py tests/test_password.py -v
 
-# B) Suite completa de 52 tests con PostgreSQL real:
-# 1. Asegurar que la base de datos esté levantada
+# B) Suite completa con PostgreSQL real (desde la raíz del repo):
+# 1. Levantar la base de datos
 podman compose up -d db
 
-# 2. Crear la base de datos de test si no existe
-podman exec lis_db_1 psql -U lis_app -d postgres -c "CREATE DATABASE lis_test;"
-podman exec -i lis_db_1 psql -U lis_app -d lis_test < db/init/001_schema.sql
+# 2. Recrear lis_test con esquema y catálogo (borra y crea la BD de pruebas)
+CONTAINER_CLI=podman ./scripts/crear_bd_test.sh
 
-# 3. Ejecutar los 52 tests pasando la URL de conexión
-TEST_DATABASE_URL="postgresql+psycopg://lis_app:CAMBIAR_por_una_clave_larga_y_aleatoria@localhost:5432/lis_test" \
+# 3. Ejecutar la suite (el nombre de la BD debe terminar en _test)
+cd backend
+TEST_DATABASE_URL="postgresql+psycopg://lis_app:<POSTGRES_PASSWORD>@127.0.0.1:5432/lis_test" \
 ./venv/bin/python -m unittest discover -s tests -v
 ```
 
