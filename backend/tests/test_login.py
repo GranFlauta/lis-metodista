@@ -7,10 +7,12 @@ from __future__ import annotations
 import unittest
 from datetime import timedelta
 
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.core.clock import ahora, set_simulated_time
 from app.core.config import Settings
+from app.main import app
 from app.models.session import LogSeguridad, Sesion
 from tests.base import IntegrationTestCase
 
@@ -116,17 +118,22 @@ class TestLoginYBloqueo(IntegrationTestCase):
         """9. Se registran LOGIN_OK y LOGIN_FALLIDO con IP; la contraseña no aparece en ningún registro."""
         self.crear_usuario_test(usuario="auditable", password="PasswordSeguro123!")
 
+        # A4 / D35-01: la IP real la resuelve uvicorn (--proxy-headers, solo detrás de Caddy) y llega
+        # en request.client. Se simula esa IP ya resuelta; la app NO debe confiar en X-Forwarded-For.
+        cliente_lab = TestClient(app, client=("192.168.1.100", 50000))
+        cabecera_falsa = {"X-Forwarded-For": "10.6.6.6"}
+
         # Fallido
-        self.client.post(
+        cliente_lab.post(
             "/api/auth/login",
             json={"usuario": "auditable", "password": "ClaveSecretaErronea!"},
-            headers={"X-Forwarded-For": "192.168.1.100"},
+            headers=cabecera_falsa,
         )
         # Exitoso
-        self.client.post(
+        cliente_lab.post(
             "/api/auth/login",
             json={"usuario": "auditable", "password": "PasswordSeguro123!"},
-            headers={"X-Forwarded-For": "192.168.1.100"},
+            headers=cabecera_falsa,
         )
 
         logs = self.db.query(LogSeguridad).order_by(LogSeguridad.id_log.asc()).all()
@@ -157,3 +164,38 @@ class TestArranqueConfiguracion(unittest.TestCase):
                 database_url="postgresql+psycopg://user:pass@localhost:5432/db",
                 jwt_secret="CAMBIAR_ESTE_SECRETO_POR_UNO_SEGURO_1234567890",
             )
+
+
+class TestSuperficieDeRed(unittest.TestCase):
+    """Fase 3.5 T1 (hallazgos A1, A2, A4; D35-01). No requieren base de datos."""
+
+    def setUp(self) -> None:
+        self.client = TestClient(app)
+
+    def test_t1a_preflight_desde_origen_ajeno_sin_cabeceras_cors(self) -> None:
+        """T1-a. OPTIONS con Origin ajeno a /api/auth/login no devuelve access-control-allow-origin."""
+        resp = self.client.options(
+            "/api/auth/login",
+            headers={
+                "Origin": "https://evil.example",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        self.assertNotIn("access-control-allow-origin", resp.headers)
+        self.assertNotIn("access-control-allow-credentials", resp.headers)
+
+    def test_t1b_docs_y_openapi_desactivados_por_defecto(self) -> None:
+        """T1-b. GET /docs y GET /openapi.json responden 404 con la configuración por defecto."""
+        self.assertEqual(self.client.get("/docs").status_code, 404)
+        self.assertEqual(self.client.get("/openapi.json").status_code, 404)
+
+    def test_t1c_raiz_no_sirve_frontend_ni_info_del_sistema(self) -> None:
+        """T1-c. GET / no devuelve el frontend ni información del sistema."""
+        resp = self.client.get("/")
+        self.assertEqual(resp.status_code, 404)
+        cuerpo = resp.text.lower()
+        self.assertNotIn("<html", cuerpo)
+        self.assertNotIn("sistema", cuerpo)
+        self.assertNotIn("/docs", cuerpo)
+        self.assertNotIn("/api/health", cuerpo)

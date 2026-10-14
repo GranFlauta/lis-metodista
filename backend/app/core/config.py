@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     max_login_attempts: int = 5
     lockout_minutes: int = 15
     cookie_secure: bool = True                  # Cambiar a false si estás en desarrollo local sin HTTPS
+    enable_docs: bool = False                   # D35-01: /docs y /openapi.json solo si es true
 
     @model_validator(mode="after")
     def validate_jwt_secret(self) -> Settings:

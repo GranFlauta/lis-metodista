@@ -36,7 +36,7 @@ WHITELIST_CAMBIO_PASSWORD = (
 def obtener_ip_cliente(request: Request) -> str | None:
     """
     Obtiene la IP del cliente usando request.client.host o cabecera x-forwarded-for.
-    Uvicorn (con --proxy-headers) resuelve automáticamente la IP del cliente enviada por Caddy / ngrok.
+    Uvicorn (con --proxy-headers) resuelve automáticamente la IP del cliente enviada por Caddy.
     """
     ip_raw = None
     if request.client and request.client.host:
