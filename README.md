@@ -16,6 +16,7 @@ Las reglas de negocio y todas las decisiones están en **[docs/DECISIONES.md](do
 - **En curso (Fase 3.5)**: endurecimiento de red (sin CORS ni ngrok), guarda de BD de pruebas, sesión configurable por el ADMIN con actividad real del usuario. Ver `PROMPT_FASE_3_5_CORRECCIONES.md` y `docs/DECISIONES.md §13`.
 - **Siguiente (Fase 3.6)**: rediseño UX fiel a Excel según `docs/UX_GUIDE.md` (`PROMPT_FASE_3_6_UX.md`).
 - **Pendiente (Fases 4+)**: publicación con folio, PDF oficial, versiones, delegación (ver `docs/DECISIONES.md §9`).
+  - **Control de ediciones**: un informe oficial publicado admite como máximo **3 versiones por folio** (V1 original → V2 → V3), lo forzado por el `CHECK` de `informes.numero_version` en el esquema. Solo el firmante edita, siempre con justificativo; un número alto de correcciones es una señal de control que debe revisarse (ver `docs/DECISIONES.md §3–§4`).
 
 ## Estructura del Proyecto
 
