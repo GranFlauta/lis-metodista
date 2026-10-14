@@ -15,6 +15,8 @@ import unittest
 from datetime import date, datetime
 from typing import Any, Generator
 
+from urllib.parse import urlsplit
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
@@ -31,21 +33,77 @@ from app.models.patient import Paciente
 from app.models.session import LogSeguridad, Sesion
 from app.models.user import Rol, Usuario
 
-TEST_DATABASE_URL = os.environ.get(
-    "TEST_DATABASE_URL",
-    "postgresql+psycopg://lis_app:CAMBIAR_por_una_clave_larga_y_aleatoria@127.0.0.1:5432/lis_test",
-)
 
-_connect_args = {}
-if "postgresql" in TEST_DATABASE_URL:
-    _connect_args["options"] = "-csearch_path=laboratorio,public"
+def validar_database_url_test(url: str | None) -> str:
+    """
+    Valida que TEST_DATABASE_URL esté definida y que el nombre de la base de datos
+    termine estrictamente en '_test' para evitar el borrado accidental de datos reales (D35-04 / A3).
+    Si no está definida o no cumple, aborta con ValueError explicando cómo definirla.
+    """
+    if not url or not url.strip():
+        raise ValueError(
+            "TEST_DATABASE_URL no está definida. Defina la variable de entorno para ejecutar pruebas con base de datos, "
+            "por ejemplo: export TEST_DATABASE_URL='postgresql+psycopg://lis_app:<PASSWORD>@127.0.0.1:5432/lis_test'"
+        )
 
-test_engine = create_engine(
-    TEST_DATABASE_URL,
-    pool_pre_ping=True,
-    connect_args=_connect_args,
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
+    url_limpia = url.strip()
+    parsed = urlsplit(url_limpia)
+    db_name = parsed.path.lstrip("/").split("?")[0].split("/")[0].strip()
+
+    if not db_name or not db_name.endswith("_test"):
+        raise ValueError(
+            f"Guarda de seguridad de pruebas (D35-04 / A3): La base de datos de pruebas debe terminar en '_test' "
+            f"para evitar el borrado accidental de datos reales. Base detectada: '{db_name or '(vacía)'}' en '{url_limpia}'."
+        )
+
+    return url_limpia
+
+
+_test_database_url: str | None = None
+_test_engine = None
+_TestingSessionLocal = None
+
+
+def get_test_database_url() -> str:
+    """Obtiene y valida la URL de la base de datos de prueba desde TEST_DATABASE_URL."""
+    global _test_database_url
+    if _test_database_url is None:
+        _test_database_url = validar_database_url_test(os.environ.get("TEST_DATABASE_URL"))
+    return _test_database_url
+
+
+def get_test_engine():
+    """Obtiene o inicializa el motor de base de datos de pruebas."""
+    global _test_engine
+    if _test_engine is None:
+        url = get_test_database_url()
+        connect_args = {}
+        if "postgresql" in url:
+            connect_args["options"] = "-csearch_path=laboratorio,public"
+        _test_engine = create_engine(
+            url,
+            pool_pre_ping=True,
+            connect_args=connect_args,
+        )
+    return _test_engine
+
+
+def get_testing_session_local():
+    """Obtiene o inicializa la fábrica de sesiones para pruebas."""
+    global _TestingSessionLocal
+    if _TestingSessionLocal is None:
+        _TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=get_test_engine())
+    return _TestingSessionLocal
+
+
+def __getattr__(name: str) -> Any:
+    if name == "test_engine":
+        return get_test_engine()
+    if name == "TestingSessionLocal":
+        return get_testing_session_local()
+    if name == "TEST_DATABASE_URL":
+        return get_test_database_url()
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
 class IntegrationTestCase(unittest.TestCase):
@@ -59,20 +117,24 @@ class IntegrationTestCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
+        engine = get_test_engine()
+        session_factory = get_testing_session_local()
+
         # 1. Comprobar conectividad con PostgreSQL real (solo capturando OperationalError)
         try:
-            with test_engine.connect() as conn:
+            with engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
         except OperationalError as exc:
+            url = get_test_database_url()
             raise AssertionError(
-                f"La base de datos de pruebas no responde en '{TEST_DATABASE_URL}': {exc}. "
+                f"La base de datos de pruebas no responde en '{url}': {exc}. "
                 "Asegúrese de levantar la base de datos (ej. podman compose up -d db) "
                 "y definir la variable TEST_DATABASE_URL correctamente."
             ) from exc
 
         # 2. Verificar que existan las tablas requeridas y el trigger en el esquema 'laboratorio'
         tablas_requeridas = {"usuarios", "sesiones", "log_seguridad", "informes", "folios"}
-        with test_engine.connect() as conn:
+        with engine.connect() as conn:
             result = conn.execute(text(
                 "SELECT table_name FROM information_schema.tables WHERE table_schema = 'laboratorio'"
             ))
@@ -95,7 +157,7 @@ class IntegrationTestCase(unittest.TestCase):
                 )
 
         # 3. Sembrar roles básicos si no existen
-        with TestingSessionLocal() as session:
+        with session_factory() as session:
             admin_rol = session.query(Rol).filter(Rol.nombre == "ADMIN").first()
             if not admin_rol:
                 session.add(Rol(nombre="ADMIN", descripcion="Administrador"))
@@ -106,7 +168,8 @@ class IntegrationTestCase(unittest.TestCase):
 
     def setUp(self) -> None:
         reset_clock()
-        self.db = TestingSessionLocal()
+        session_factory = get_testing_session_local()
+        self.db = session_factory()
 
         # Limpiar datos transaccionales entre pruebas en orden estricto de dependencias
         self.db.execute(text("SET session_replication_role = 'replica'"))
@@ -125,7 +188,7 @@ class IntegrationTestCase(unittest.TestCase):
         self.db.commit()
 
         def override_get_db() -> Generator[Session, None, None]:
-            db_session = TestingSessionLocal()
+            db_session = session_factory()
             try:
                 yield db_session
             finally:
