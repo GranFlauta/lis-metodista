@@ -216,7 +216,7 @@ export const PacienteFormModal: React.FC<PacienteFormModalProps> = ({
 
           {conflictoId && (
             <div className="lis-conflict-banner">
-              <h4>⚠️ Paciente ya registrado</h4>
+              <h4>Paciente ya registrado</h4>
               <p>{conflictoMensaje || "Ya existe un paciente con este documento de identidad en el sistema."}</p>
               <div className="lis-conflict-actions">
                 {onVerPacienteExistente && (

@@ -1,16 +1,9 @@
 /**
- * Asistente de Creación de Órdenes Clínicas (Fase 2 Bloque 5).
- * PROMPT_FASE_2.md §8.3, §9:
- * 1. Paciente: buscar existente o alta integrada con regla CI vs Sin CI.
- * 2. Perfil opcional con preselección de estudios y libertad de marcado/desmarcado.
- * 3. Selección granular por grupos para Inmunoserología (etiqueta provisional D2-09).
- * 4. Datos de la orden y cálculo automático de edad con fecha de nacimiento (D2-08).
- * 5. Detección de duplicados D2-04:
- *    - Advertencias de solapamiento parcial (revela autor y códigos).
- *    - Bloqueo 409 ORDEN_DUPLICADA_EN_CURSO (nombre de colega, sin saltarse bloqueo).
+ * Creación de Órdenes Clínicas en una sola pantalla (3 zonas en fila).
+ * PROMPT_FASE_3_6_UX.md §6.3 y §6.4, docs/UX_GUIDE.md §2.
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   EstudioCatalogo,
@@ -25,34 +18,56 @@ import {
   PacienteDetalle,
 } from "../../api/pacientes";
 import {
-  AdvertenciaSolapamiento,
   crearOrdenApi,
   EstudioItemCreate,
   OrdenCreatePayload,
-  OrdenDetalle,
 } from "../../api/ordenes";
 import { ApiError } from "../../api/client";
+
+function obtenerFechaHoraActualLocal(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const year = d.getFullYear();
+  const month = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const hours = pad(d.getHours());
+  const minutes = pad(d.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function calcularEdadAnios(fechaNacimiento: string | null | undefined): number | null {
+  if (!fechaNacimiento) return null;
+  const nac = new Date(fechaNacimiento);
+  if (isNaN(nac.getTime())) return null;
+  const hoy = new Date();
+  let anios = hoy.getFullYear() - nac.getFullYear();
+  const m = hoy.getMonth() - nac.getMonth();
+  if (m < 0 || (m === 0 && hoy.getDate() < nac.getDate())) {
+    anios--;
+  }
+  return Math.max(0, anios);
+}
 
 export const NuevaOrdenPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const idPacienteParam = searchParams.get("id_paciente");
+  const idPacienteParam = searchParams.get("id_paciente") || searchParams.get("pacienteId");
 
   // Catálogo clínico
   const [estudiosCatalogo, setEstudiosCatalogo] = useState<EstudioCatalogo[]>([]);
   const [perfilesCatalogo, setPerfilesCatalogo] = useState<PerfilCatalogo[]>([]);
   const [cargandoCatalogo, setCargandoCatalogo] = useState<boolean>(true);
 
-  // Sección 1: Paciente
-  const [modoPaciente, setModoPaciente] = useState<"existente" | "nuevo">("existente");
+  // Zona 1: Paciente
+  const [modoCrearNuevo, setModoCrearNuevo] = useState<boolean>(false);
   const [pacienteSeleccionado, setPacienteSeleccionado] = useState<PacienteDetalle | null>(null);
 
-  // Búsqueda de paciente existente
-  const [busquedaPaciente, setBusquedaPaciente] = useState<string>("");
-  const [resultadosPacientes, setResultadosPacientes] = useState<PacienteDetalle[]>([]);
-  const [buscandoPacientes, setBuscandoPacientes] = useState<boolean>(false);
+  // Buscador de paciente
+  const [busqueda, setBusqueda] = useState<string>("");
+  const [resultadosBusqueda, setResultadosBusqueda] = useState<PacienteDetalle[]>([]);
+  const [buscando, setBuscando] = useState<boolean>(false);
 
-  // Formulario de paciente nuevo integrado
+  // Formulario nuevo paciente
   const [nuevoSinCi, setNuevoSinCi] = useState<boolean>(false);
   const [nuevoCi, setNuevoCi] = useState<string>("");
   const [nuevoCiComp, setNuevoCiComp] = useState<string>("");
@@ -61,101 +76,132 @@ export const NuevaOrdenPage: React.FC = () => {
   const [nuevoMaterno, setNuevoMaterno] = useState<string>("");
   const [nuevoSexo, setNuevoSexo] = useState<"M" | "F">("M");
   const [nuevoFechaNac, setNuevoFechaNac] = useState<string>("");
-  const [nuevoTelefono, setNuevoTelefono] = useState<string>("");
+  const [nuevoEdadAnios, setNuevoEdadAnios] = useState<string>("");
   const [conflictoPacienteId, setConflictoPacienteId] = useState<number | null>(null);
 
-  // Sección 2: Perfil y Estudios
-  const [perfilSeleccionado, setPerfilSeleccionado] = useState<string>("");
+  // Zona 2: Perfil y Estudios
+  const [perfilActivo, setPerfilActivo] = useState<string>("");
   const [estudiosSeleccionados, setEstudiosSeleccionados] = useState<Set<string>>(new Set());
   const [gruposInmunosero, setGruposInmunosero] = useState<Set<string>>(new Set());
 
-  // Sección 3: Datos de la Orden
+  // Zona 3: Datos de la Orden
   const [origenSolicitud, setOrigenSolicitud] = useState<string>("");
   const [medicoSolicitante, setMedicoSolicitante] = useState<string>("");
   const [pieza, setPieza] = useState<string>("");
-  const [fechaTomaMuestra, setFechaTomaMuestra] = useState<string>("");
-  const [edadAnios, setEdadAnios] = useState<string>("");
-  const [edadMeses, setEdadMeses] = useState<string>("0");
 
-  // Estado del proceso de creación
-  const [enviando, setEnviando] = useState<boolean>(false);
-  const [errorGlobal, setErrorGlobal] = useState<string | null>(null);
-
-  // Estados de respuesta especial (D2-04 / D2-05)
+  // Modal de confirmación (§6.4)
+  const [modalAbierto, setModalAbierto] = useState<boolean>(false);
+  const [fechaHoraInicio, setFechaHoraInicio] = useState<string>(obtenerFechaHoraActualLocal());
+  const [guardando, setGuardando] = useState<boolean>(false);
+  const [errorModal, setErrorModal] = useState<string | null>(null);
   const [bloqueoDuplicado, setBloqueoDuplicado] = useState<{
     autor: { nombres: string; apellido_paterno: string };
     estudios: string[];
   } | null>(null);
 
-  const [ordenCreadaExito, setOrdenCreadaExito] = useState<{
-    orden: OrdenDetalle;
-    advertencias: AdvertenciaSolapamiento[];
-  } | null>(null);
+  const botonEmpezarRef = useRef<HTMLButtonElement | null>(null);
 
   // 1. Cargar catálogo clínico al montar
   useEffect(() => {
-    const cargarCat = async () => {
+    let montado = true;
+    async function cargarCat() {
       setCargandoCatalogo(true);
       try {
         const [estData, perfData] = await Promise.all([
           obtenerEstudiosCatalogoApi(),
           obtenerPerfilesCatalogoApi(),
         ]);
-        setEstudiosCatalogo(estData);
-        setPerfilesCatalogo(perfData);
+        if (montado) {
+          setEstudiosCatalogo(estData);
+          setPerfilesCatalogo(perfData);
+        }
       } catch {
-        setErrorGlobal("Error al cargar el catálogo de estudios y perfiles.");
+        // Silencioso o manejo local
       } finally {
-        setCargandoCatalogo(false);
+        if (montado) {
+          setCargandoCatalogo(false);
+        }
       }
-    };
+    }
     cargarCat();
+    return () => {
+      montado = false;
+    };
   }, []);
 
   // 2. Cargar paciente si viene en parámetro de URL
   useEffect(() => {
     if (idPacienteParam) {
-      const cargarPac = async () => {
+      let montado = true;
+      async function cargarPac() {
         try {
           const pac = await obtenerPacienteApi(Number(idPacienteParam));
-          setPacienteSeleccionado(pac);
-          setModoPaciente("existente");
+          if (montado) {
+            setPacienteSeleccionado(pac);
+            setModoCrearNuevo(false);
+          }
         } catch {
-          // Si falla, queda en modo normal
+          // Si falla, se ignora
         }
-      };
+      }
       cargarPac();
+      return () => {
+        montado = false;
+      };
     }
   }, [idPacienteParam]);
 
-  // 3. Debounce para búsqueda de paciente existente (300 ms)
+  // 3. Debounce para búsqueda única de paciente (300 ms)
   useEffect(() => {
-    if (modoPaciente !== "existente" || pacienteSeleccionado) return;
-    if (!busquedaPaciente.trim()) {
-      setResultadosPacientes([]);
+    if (modoCrearNuevo || pacienteSeleccionado) return;
+    if (!busqueda.trim()) {
+      setResultadosBusqueda([]);
       return;
     }
 
     const timer = setTimeout(async () => {
-      setBuscandoPacientes(true);
+      setBuscando(true);
       try {
-        const resp = await listarPacientesApi({ q: busquedaPaciente.trim(), limit: 5 });
-        setResultadosPacientes(resp.items);
+        const resp = await listarPacientesApi({ q: busqueda.trim(), limit: 5 });
+        setResultadosBusqueda(resp.items);
       } catch {
-        setResultadosPacientes([]);
+        setResultadosBusqueda([]);
       } finally {
-        setBuscandoPacientes(false);
+        setBuscando(false);
       }
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [busquedaPaciente, modoPaciente, pacienteSeleccionado]);
+  }, [busqueda, modoCrearNuevo, pacienteSeleccionado]);
 
-  // Manejo de selección de perfil preconfigurado
+  // Foco en botón "Empezar a calcular" al abrir el modal
+  useEffect(() => {
+    if (modalAbierto) {
+      const timer = setTimeout(() => {
+        botonEmpezarRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [modalAbierto]);
+
+  // Manejo de tecla Escape para cerrar modal
+  useEffect(() => {
+    const manejarKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && modalAbierto && !guardando) {
+        setModalAbierto(false);
+      }
+    };
+    window.addEventListener("keydown", manejarKeyDown);
+    return () => window.removeEventListener("keydown", manejarKeyDown);
+  }, [modalAbierto, guardando]);
+
+  // Preselección por botón de perfil (D36-02)
   const handleSeleccionarPerfil = (codigoPerfil: string) => {
-    setPerfilSeleccionado(codigoPerfil);
-    if (!codigoPerfil) return;
-
+    if (perfilActivo === codigoPerfil) {
+      setPerfilActivo("");
+      return;
+    }
+    setPerfilActivo(codigoPerfil);
     const perfil = perfilesCatalogo.find((p) => p.codigo === codigoPerfil);
     if (!perfil) return;
 
@@ -177,6 +223,7 @@ export const NuevaOrdenPage: React.FC = () => {
 
   // Toggle de estudio individual
   const handleToggleEstudio = (codigoEstudio: string) => {
+    setPerfilActivo("");
     const copia = new Set(estudiosSeleccionados);
     if (copia.has(codigoEstudio)) {
       copia.delete(codigoEstudio);
@@ -185,7 +232,6 @@ export const NuevaOrdenPage: React.FC = () => {
       }
     } else {
       copia.add(codigoEstudio);
-      // Si activa Inmunoserología y no tiene grupos, premarcar todos los grupos disponibles
       if (codigoEstudio === "INMUNOSEROLOGIA") {
         const inmu = estudiosCatalogo.find((e) => e.codigo === "INMUNOSEROLOGIA");
         if (inmu?.grupos) {
@@ -206,7 +252,6 @@ export const NuevaOrdenPage: React.FC = () => {
     }
     setGruposInmunosero(copia);
 
-    // Si tiene al menos un grupo marcado, asegura que Inmunoserología esté marcada
     if (copia.size > 0 && !estudiosSeleccionados.has("INMUNOSEROLOGIA")) {
       const copiaEst = new Set(estudiosSeleccionados);
       copiaEst.add("INMUNOSEROLOGIA");
@@ -218,59 +263,40 @@ export const NuevaOrdenPage: React.FC = () => {
     }
   };
 
-  // Determinar si el paciente tiene fecha de nacimiento
-  const tieneFechaNacimiento = Boolean(
-    (modoPaciente === "existente" && pacienteSeleccionado?.fecha_nacimiento) ||
-    (modoPaciente === "nuevo" && nuevoFechaNac)
+  // Validación para habilitar el botón "Continuar"
+  const pacienteValido = Boolean(
+    pacienteSeleccionado ||
+    (modoCrearNuevo &&
+      nuevoNombres.trim() &&
+      nuevoPaterno.trim() &&
+      (nuevoSinCi || nuevoCi.trim().length >= 5) &&
+      (nuevoFechaNac || nuevoEdadAnios.trim()))
   );
 
-  // Enviar formulario de creación de orden
-  const handleSubmitOrden = async (e: React.FormEvent) => {
+  const estudiosValidos =
+    estudiosSeleccionados.size > 0 &&
+    (!estudiosSeleccionados.has("INMUNOSEROLOGIA") || gruposInmunosero.size > 0);
+
+  const puedeContinuar = pacienteValido && estudiosValidos;
+
+  // Abrir ventana modal de confirmación (§6.4)
+  const handleContinuar = (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorGlobal(null);
+    if (!puedeContinuar) return;
+    setErrorModal(null);
+    setBloqueoDuplicado(null);
+    setConflictoPacienteId(null);
+    setFechaHoraInicio(obtenerFechaHoraActualLocal());
+    setModalAbierto(true);
+  };
+
+  // Ejecutar creación real al pulsar "Empezar a calcular" en el modal
+  const handleEmpezarCalculo = async () => {
+    setErrorModal(null);
     setBloqueoDuplicado(null);
     setConflictoPacienteId(null);
 
-    // Validar selección de paciente
-    if (modoPaciente === "existente" && !pacienteSeleccionado) {
-      setErrorGlobal("Debe buscar y seleccionar un paciente para la orden.");
-      return;
-    }
-
-    if (modoPaciente === "nuevo") {
-      const nom = nuevoNombres.trim();
-      const pat = nuevoPaterno.trim();
-      if (!nom || !pat) {
-        setErrorGlobal("Los nombres y apellido paterno son obligatorios para el paciente nuevo.");
-        return;
-      }
-      if (!nuevoSinCi && (!nuevoCi.trim() || nuevoCi.trim().length < 5)) {
-        setErrorGlobal("El número de CI debe tener entre 5 y 30 caracteres.");
-        return;
-      }
-    }
-
-    // Validar estudios
-    if (estudiosSeleccionados.size === 0) {
-      setErrorGlobal("Debe seleccionar al menos un estudio clínico para crear la orden.");
-      return;
-    }
-
-    if (estudiosSeleccionados.has("INMUNOSEROLOGIA") && gruposInmunosero.size === 0) {
-      setErrorGlobal("Debe marcar al menos un grupo para el estudio de Inmunoserología.");
-      return;
-    }
-
-    // Validar edad si no tiene fecha de nacimiento
-    if (!tieneFechaNacimiento) {
-      const aniosNum = parseInt(edadAnios, 10);
-      if (isNaN(aniosNum) || aniosNum < 0 || aniosNum > 130) {
-        setErrorGlobal("La edad en años es obligatoria (entre 0 y 130) cuando el paciente no tiene fecha de nacimiento.");
-        return;
-      }
-    }
-
-    // Construir lista de estudios para el payload
+    // 1. Estudios payload
     const estudiosPayload: EstudioItemCreate[] = Array.from(estudiosSeleccionados).map((codigo) => {
       if (codigo === "INMUNOSEROLOGIA") {
         return {
@@ -281,10 +307,12 @@ export const NuevaOrdenPage: React.FC = () => {
       return { codigo };
     });
 
-    // Construir payload de paciente nuevo si aplica
-    let pacientePayload: PacienteCreatePayload | null = null;
-    if (modoPaciente === "nuevo") {
-      pacientePayload = {
+    // 2. Paciente payload si es nuevo
+    let pacPayload: PacienteCreatePayload | null = null;
+    let edadAniosFinal: number | null = null;
+
+    if (modoCrearNuevo) {
+      pacPayload = {
         sin_ci: nuevoSinCi,
         ci: nuevoSinCi ? null : nuevoCi.trim().replace(/\s+/g, "").toUpperCase(),
         ci_complemento: nuevoSinCi || !nuevoCiComp.trim() ? null : nuevoCiComp.trim().toUpperCase(),
@@ -293,31 +321,34 @@ export const NuevaOrdenPage: React.FC = () => {
         apellido_materno: nuevoMaterno.trim() ? nuevoMaterno.trim().replace(/\s+/g, " ") : null,
         sexo: nuevoSexo,
         fecha_nacimiento: nuevoFechaNac || null,
-        telefono: nuevoTelefono.trim() || null,
+        telefono: null,
       };
+      if (!nuevoFechaNac && nuevoEdadAnios) {
+        edadAniosFinal = parseInt(nuevoEdadAnios, 10);
+      }
     }
 
     const payload: OrdenCreatePayload = {
-      id_paciente: modoPaciente === "existente" && pacienteSeleccionado ? pacienteSeleccionado.id : null,
-      paciente: pacientePayload,
-      perfil: perfilSeleccionado || null,
+      id_paciente: pacienteSeleccionado ? pacienteSeleccionado.id : null,
+      paciente: pacPayload,
+      perfil: perfilActivo || null,
       estudios: estudiosPayload,
       origen_solicitud: origenSolicitud.trim() || null,
       medico_solicitante: medicoSolicitante.trim() || null,
       pieza: pieza.trim() || null,
-      fecha_hora_toma_muestra: fechaTomaMuestra || null,
-      edad_anios: tieneFechaNacimiento ? null : parseInt(edadAnios, 10),
-      edad_meses: tieneFechaNacimiento ? null : parseInt(edadMeses, 10) || 0,
+      fecha_hora_toma_muestra: fechaHoraInicio ? new Date(fechaHoraInicio).toISOString() : null,
+      edad_anios: edadAniosFinal,
+      edad_meses: 0,
     };
 
-    setEnviando(true);
+    setGuardando(true);
     try {
       const resp = await crearOrdenApi(payload);
-      if (resp.advertencias && resp.advertencias.length > 0) {
-        setOrdenCreadaExito(resp);
-      } else {
-        navigate(`/ordenes/${resp.orden.id}`);
-      }
+      setModalAbierto(false);
+      // Navega directo a la captura de resultados (D36-02 / §6.4)
+      navigate(`/ordenes/${resp.orden.id}/captura`, {
+        state: { advertencias: resp.advertencias || [] },
+      });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         if (err.status === 409 && err.codigo === "ORDEN_DUPLICADA_EN_CURSO") {
@@ -325,561 +356,626 @@ export const NuevaOrdenPage: React.FC = () => {
           if (det) {
             setBloqueoDuplicado(det);
           } else {
-            setErrorGlobal(err.message);
+            setErrorModal(err.message);
           }
         } else if (err.status === 409 && err.codigo === "CONFLICTO") {
           const pacId = (err.extra as { paciente_existente_id?: number })?.paciente_existente_id;
           if (pacId) {
             setConflictoPacienteId(pacId);
           }
-          setErrorGlobal(err.message);
+          setErrorModal(err.message);
         } else {
-          setErrorGlobal(err.message);
+          setErrorModal(err.message);
         }
       } else {
-        setErrorGlobal("Ocurrió un error inesperado al procesar la orden.");
+        setErrorModal("Error inesperado al registrar la orden.");
       }
     } finally {
-      setEnviando(false);
+      setGuardando(false);
     }
   };
 
+  // Datos calculados para el resumen y confirmación
+  const nombreCompleto = pacienteSeleccionado
+    ? `${pacienteSeleccionado.apellido_paterno} ${pacienteSeleccionado.apellido_materno || ""}, ${pacienteSeleccionado.nombres}`
+    : modoCrearNuevo
+    ? `${nuevoPaterno} ${nuevoMaterno}, ${nuevoNombres}`
+    : "Sin paciente";
+
+  const ciMostrado = pacienteSeleccionado
+    ? pacienteSeleccionado.sin_ci
+      ? "Sin CI"
+      : `CI ${pacienteSeleccionado.ci}${pacienteSeleccionado.ci_complemento ? `-${pacienteSeleccionado.ci_complemento}` : ""}`
+    : modoCrearNuevo
+    ? nuevoSinCi
+      ? "Sin CI"
+      : `CI ${nuevoCi}${nuevoCiComp ? `-${nuevoCiComp}` : ""}`
+    : "—";
+
+  const edadAniosCalculada = pacienteSeleccionado
+    ? calcularEdadAnios(pacienteSeleccionado.fecha_nacimiento)
+    : nuevoFechaNac
+    ? calcularEdadAnios(nuevoFechaNac)
+    : nuevoEdadAnios
+    ? parseInt(nuevoEdadAnios, 10)
+    : null;
+
   return (
-    <div className="lis-page-container">
-      <div className="lis-wizard-container">
-        {/* Encabezado */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "1rem" }}>
-          <div>
-            <Link to="/ordenes" className="lis-btn lis-btn-text" style={{ paddingLeft: 0, marginBottom: "0.25rem", display: "inline-block" }}>
-              ← Volver a Órdenes
-            </Link>
-            <h2>Asistente de Creación de Orden</h2>
-            <p className="lis-page-sub">
-              Solicitud de determinaciones clínicas, asignación de perfiles y verificación de duplicidad (D2-04).
-            </p>
-          </div>
-        </div>
-
-        {/* Banner de Bloqueo Estricto 409 ORDEN_DUPLICADA_EN_CURSO (D2-04) */}
-        {bloqueoDuplicado && (
-          <div className="lis-block-duplicate-card" role="alert">
-            <h4>⛔ Trabajo Clínico Duplicado en Curso</h4>
-            <p>
-              El colega bioquímico <strong>{bloqueoDuplicado.autor.nombres} {bloqueoDuplicado.autor.apellido_paterno}</strong> ya tiene una orden activa
-              en curso para este paciente que cubre los estudios solicitados:
-            </p>
-            <div className="lis-chips-container" style={{ margin: "0.25rem 0" }}>
-              {bloqueoDuplicado.estudios.map((c) => (
-                <span key={c} className="lis-chip" style={{ backgroundColor: "#fee2e2", color: "#991b1b", borderColor: "#fca5a5" }}>
-                  {c}
-                </span>
-              ))}
-            </div>
-            <p style={{ fontSize: "0.85rem", marginTop: "0.25rem" }}>
-              Por directiva clínica institucional (D2-04), la creación de esta orden ha sido bloqueada para evitar duplicación de trabajo y reactivos.
-              Espere a que el autor responsable complete o descarte su borrador.
-            </p>
-          </div>
-        )}
-
-        {/* Banner de Advertencia de Solapamiento con Éxito (D2-04 / D2-05) */}
-        {ordenCreadaExito && (
-          <div className="lis-overlap-banner" role="status">
-            <h4>⚠️ Advertencia de Solapamiento Clínico</h4>
-            <p>
-              La orden <strong>#{ordenCreadaExito.orden.numero_orden_paciente}</strong> fue registrada exitosamente como borrador, pero se detectaron estudios concurrentes
-              en órdenes de otros colegas bioquímicos:
-            </p>
-            <ul style={{ paddingLeft: "1.2rem", margin: "0.25rem 0" }}>
-              {ordenCreadaExito.advertencias.map((adv, idx) => (
-                <li key={idx}>
-                  Bioquímico(a) <strong>{adv.autor.nombres} {adv.autor.apellido_paterno}</strong> tiene en proceso:{" "}
-                  <strong>{adv.estudios.join(", ")}</strong>.
-                </li>
-              ))}
-            </ul>
-            <div style={{ marginTop: "0.5rem" }}>
+    <div className="lis-page-container" style={{ padding: 0 }}>
+      {/* Tres zonas en fila sin scroll de página en 1366x768 (§6.3) */}
+      <form onSubmit={handleContinuar} className="lis-nueva-orden-grid">
+        {/* ZONA 1: PACIENTE */}
+        <section className="lis-zone-card" aria-label="Zona 1: Paciente">
+          <div className="lis-zone-header">
+            <h2 className="lis-zone-title">
+              <span className="lis-zone-badge">1</span>
+              Paciente
+            </h2>
+            {pacienteSeleccionado && (
               <button
                 type="button"
-                className="lis-btn lis-btn-primary"
-                onClick={() => navigate(`/ordenes/${ordenCreadaExito.orden.id}`)}
+                className="lis-btn lis-btn-text lis-btn-sm"
+                onClick={() => setPacienteSeleccionado(null)}
               >
-                Continuar a la Orden Creada →
+                Cambiar
               </button>
-            </div>
+            )}
           </div>
-        )}
 
-        {/* Alerta de Error General */}
-        {errorGlobal && <div className="lis-alert lis-alert-error">{errorGlobal}</div>}
-
-        <form onSubmit={handleSubmitOrden} style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-          {/* SECCIÓN 1: PACIENTE */}
-          <div className="lis-wizard-card">
-            <div className="lis-wizard-header">
-              <span className="lis-step-number">1</span>
-              <h3>Identificación del Paciente</h3>
-            </div>
-
-            {/* Selector de Modo */}
-            <div style={{ display: "flex", gap: "0.75rem", borderBottom: "1px solid #f1f5f9", paddingBottom: "0.75rem" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", cursor: "pointer", fontWeight: 600 }}>
+          <div className="lis-zone-content">
+            {/* 1A: Paciente Seleccionado */}
+            {pacienteSeleccionado ? (
+              <div className="lis-paciente-compact-box">
+                <div className="lis-paciente-compact-header">
+                  <span className="lis-paciente-compact-nombre">
+                    {pacienteSeleccionado.apellido_paterno} {pacienteSeleccionado.apellido_materno || ""}, {pacienteSeleccionado.nombres}
+                  </span>
+                </div>
+                <div className="lis-paciente-compact-meta">
+                  <span>{pacienteSeleccionado.sin_ci ? "Sin CI" : `CI: ${pacienteSeleccionado.ci}`}</span>
+                  <span>{pacienteSeleccionado.sexo === "M" ? "Masculino" : "Femenino"}</span>
+                  {edadAniosCalculada !== null && <span>{edadAniosCalculada} años</span>}
+                </div>
+              </div>
+            ) : !modoCrearNuevo ? (
+              /* 1B: Buscador único de paciente */
+              <div className="lis-paciente-search-wrap">
+                <label htmlFor="buscador-paciente-input" style={{ fontSize: "12.5px", fontWeight: 600 }}>
+                  Buscar paciente
+                </label>
                 <input
-                  type="radio"
-                  name="modo_paciente"
-                  checked={modoPaciente === "existente"}
-                  onChange={() => {
-                    setModoPaciente("existente");
-                    setErrorGlobal(null);
-                  }}
+                  id="buscador-paciente-input"
+                  type="search"
+                  value={busqueda}
+                  onChange={(e) => setBusqueda(e.target.value)}
+                  placeholder="CI o apellidos del paciente..."
+                  autoComplete="off"
+                  autoFocus
+                  style={{ width: "100%" }}
                 />
-                Paciente Existente
-              </label>
 
-              <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", cursor: "pointer", fontWeight: 600 }}>
-                <input
-                  type="radio"
-                  name="modo_paciente"
-                  checked={modoPaciente === "nuevo"}
-                  onChange={() => {
-                    setModoPaciente("nuevo");
-                    setErrorGlobal(null);
-                  }}
-                />
-                Nuevo Paciente (Alta Integrada en 1 Transacción)
-              </label>
-            </div>
+                {buscando && (
+                  <span className="lis-text-muted" style={{ fontSize: "12px", marginTop: "4px" }}>
+                    Buscando…
+                  </span>
+                )}
 
-            {/* Modo 1A: Paciente Existente */}
-            {modoPaciente === "existente" && (
-              <div>
-                {pacienteSeleccionado ? (
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "1rem", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "var(--radius)" }}>
-                    <div>
-                      <span className="lis-status-badge lis-status-active" style={{ marginRight: "0.5rem" }}>
-                        Seleccionado
-                      </span>
-                      <strong>{pacienteSeleccionado.apellido_paterno} {pacienteSeleccionado.apellido_materno || ""}, {pacienteSeleccionado.nombres}</strong>
-                      <div style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "0.2rem" }}>
-                        {pacienteSeleccionado.sin_ci ? "Sin CI" : `CI: ${pacienteSeleccionado.ci}${pacienteSeleccionado.ci_complemento ? `-${pacienteSeleccionado.ci_complemento}` : ""}`} |{" "}
-                        Sexo: {pacienteSeleccionado.sexo === "M" ? "Masculino" : "Femenino"} |{" "}
-                        F. Nac: {pacienteSeleccionado.fecha_nacimiento || "No registrada"}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className="lis-btn lis-btn-outline lis-btn-sm"
-                      onClick={() => setPacienteSeleccionado(null)}
-                    >
-                      Cambiar
-                    </button>
-                  </div>
-                ) : (
-                  <div>
-                    <div className="lis-form-group">
-                      <label htmlFor="input-buscar-paciente-orden">Buscar Paciente por CI o Nombre</label>
-                      <input
-                        id="input-buscar-paciente-orden"
-                        type="search"
-                        value={busquedaPaciente}
-                        onChange={(e) => setBusquedaPaciente(e.target.value)}
-                        placeholder="Escriba número de documento o apellidos..."
-                        autoComplete="off"
-                      />
-                    </div>
-
-                    {buscandoPacientes && <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Buscando pacientes...</p>}
-
-                    {resultadosPacientes.length > 0 && (
-                      <div style={{ border: "1px solid var(--border-color)", borderRadius: "var(--radius)", marginTop: "0.5rem", overflow: "hidden" }}>
-                        {resultadosPacientes.map((p) => (
-                          <div
-                            key={p.id}
-                            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.65rem 1rem", borderBottom: "1px solid #f1f5f9" }}
-                          >
-                            <div>
-                              <strong>{p.apellido_paterno} {p.apellido_materno || ""}, {p.nombres}</strong>
-                              <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginLeft: "0.5rem" }}>
-                                ({p.sin_ci ? "Sin CI" : `CI: ${p.ci}`})
-                              </span>
-                            </div>
-                            <button
-                              type="button"
-                              className="lis-btn lis-btn-primary lis-btn-sm"
-                              onClick={() => {
-                                setPacienteSeleccionado(p);
-                                setResultadosPacientes([]);
-                                setBusquedaPaciente("");
-                              }}
-                            >
-                              Seleccionar
-                            </button>
+                {/* Dropdown de resultados */}
+                {resultadosBusqueda.length > 0 && (
+                  <div className="lis-dropdown-results" role="listbox">
+                    {resultadosBusqueda.map((p) => (
+                      <div
+                        key={p.id}
+                        className="lis-dropdown-item"
+                        onClick={() => {
+                          setPacienteSeleccionado(p);
+                          setResultadosBusqueda([]);
+                          setBusqueda("");
+                        }}
+                        role="option"
+                        aria-selected="false"
+                      >
+                        <div>
+                          <strong>
+                            {p.apellido_paterno} {p.apellido_materno || ""}, {p.nombres}
+                          </strong>
+                          <div className="lis-text-muted" style={{ fontSize: "11.5px" }}>
+                            {p.sin_ci ? "Sin CI" : `CI: ${p.ci}`} • {p.sexo}
                           </div>
-                        ))}
+                        </div>
+                        <span className="lis-btn lis-btn-secondary lis-btn-sm">Elegir</span>
                       </div>
-                    )}
+                    ))}
                   </div>
                 )}
-              </div>
-            )}
 
-            {/* Modo 1B: Nuevo Paciente Integrado */}
-            {modoPaciente === "nuevo" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <div style={{ marginTop: "12px", borderTop: "1px dashed var(--border-light)", paddingTop: "8px" }}>
+                  <button
+                    type="button"
+                    className="lis-btn lis-btn-text"
+                    style={{ padding: 0, fontSize: "13px", fontWeight: 600 }}
+                    onClick={() => {
+                      setModoCrearNuevo(true);
+                      setBusqueda("");
+                      setResultadosBusqueda([]);
+                    }}
+                  >
+                    + Crear paciente nuevo
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* 1C: Formulario compacto de paciente nuevo integrado en la misma zona */
+              <div className="lis-nuevo-paciente-form">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <strong>Nuevo paciente</strong>
+                  <button
+                    type="button"
+                    className="lis-btn lis-btn-text lis-btn-sm"
+                    onClick={() => setModoCrearNuevo(false)}
+                  >
+                    Volver a buscar
+                  </button>
+                </div>
+
                 {conflictoPacienteId && (
-                  <div className="lis-conflict-banner">
-                    <h4>⚠️ Cédula de Identidad ya registrada</h4>
-                    <p>Ya existe un paciente con este CI. ¿Desea asociar la nueva orden al paciente existente?</p>
+                  <div className="lis-alert lis-alert-warning" style={{ padding: "6px 8px", fontSize: "12px" }}>
+                    <span>CI ya registrado.</span>
                     <button
                       type="button"
                       className="lis-btn lis-btn-primary lis-btn-sm"
                       onClick={async () => {
                         const pac = await obtenerPacienteApi(conflictoPacienteId);
                         setPacienteSeleccionado(pac);
-                        setModoPaciente("existente");
+                        setModoCrearNuevo(false);
                         setConflictoPacienteId(null);
-                        setErrorGlobal(null);
                       }}
                     >
-                      Usar Paciente Existente (#{conflictoPacienteId}) →
+                      Usar paciente existente
                     </button>
                   </div>
                 )}
 
-                <div style={{ backgroundColor: "#f8fafc", padding: "0.65rem 0.85rem", borderRadius: "var(--radius)", border: "1px solid var(--border-color)" }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontWeight: 600 }}>
-                    <input
-                      type="checkbox"
-                      checked={nuevoSinCi}
-                      onChange={(e) => {
-                        setNuevoSinCi(e.target.checked);
-                        if (e.target.checked) {
-                          setNuevoCi("");
-                          setNuevoCiComp("");
-                        }
-                      }}
-                    />
-                    Paciente sin Carnet de Identidad (Sin CI)
-                  </label>
-                </div>
+                <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer", fontSize: "12.5px" }}>
+                  <input
+                    type="checkbox"
+                    checked={nuevoSinCi}
+                    onChange={(e) => {
+                      setNuevoSinCi(e.target.checked);
+                      if (e.target.checked) {
+                        setNuevoCi("");
+                        setNuevoCiComp("");
+                      }
+                    }}
+                  />
+                  Sin Carnet de Identidad (Sin CI)
+                </label>
+
+                {!nuevoSinCi && (
+                  <div className="lis-form-row">
+                    <div>
+                      <label style={{ fontSize: "11px" }}>CI *</label>
+                      <input
+                        type="text"
+                        value={nuevoCi}
+                        onChange={(e) => setNuevoCi(e.target.value.toUpperCase())}
+                        placeholder="Número de CI"
+                        required={!nuevoSinCi}
+                        style={{ width: "100%", padding: "4px 8px" }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: "11px" }}>Comp.</label>
+                      <input
+                        type="text"
+                        value={nuevoCiComp}
+                        onChange={(e) => setNuevoCiComp(e.target.value.toUpperCase())}
+                        placeholder="Ej. 1A"
+                        maxLength={5}
+                        style={{ width: "100%", padding: "4px 8px" }}
+                      />
+                    </div>
+                  </div>
+                )}
 
                 <div className="lis-form-row">
-                  <div className="lis-form-group" style={{ flex: 2 }}>
-                    <label>CI {!nuevoSinCi && "*"}</label>
-                    <input
-                      type="text"
-                      value={nuevoCi}
-                      onChange={(e) => setNuevoCi(e.target.value.toUpperCase())}
-                      disabled={nuevoSinCi}
-                      placeholder={nuevoSinCi ? "Deshabilitado" : "Ej. 4839201"}
-                      maxLength={30}
-                    />
-                  </div>
-                  <div className="lis-form-group" style={{ flex: 1 }}>
-                    <label>Complemento</label>
-                    <input
-                      type="text"
-                      value={nuevoCiComp}
-                      onChange={(e) => setNuevoCiComp(e.target.value.toUpperCase())}
-                      disabled={nuevoSinCi}
-                      placeholder="Ej. 1A"
-                      maxLength={5}
-                    />
-                  </div>
-                </div>
-
-                <div className="lis-form-row">
-                  <div className="lis-form-group">
-                    <label>Apellido Paterno *</label>
+                  <div>
+                    <label style={{ fontSize: "11px" }}>Paterno *</label>
                     <input
                       type="text"
                       value={nuevoPaterno}
                       onChange={(e) => setNuevoPaterno(e.target.value)}
-                      placeholder="Ej. Flores"
-                      maxLength={100}
+                      placeholder="Ap. Paterno"
+                      required
+                      style={{ width: "100%", padding: "4px 8px" }}
                     />
                   </div>
-                  <div className="lis-form-group">
-                    <label>Apellido Materno</label>
+                  <div>
+                    <label style={{ fontSize: "11px" }}>Materno</label>
                     <input
                       type="text"
                       value={nuevoMaterno}
                       onChange={(e) => setNuevoMaterno(e.target.value)}
-                      placeholder="Ej. Vargas"
-                      maxLength={100}
+                      placeholder="Ap. Materno"
+                      style={{ width: "100%", padding: "4px 8px" }}
                     />
                   </div>
                 </div>
 
-                <div className="lis-form-group">
-                  <label>Nombres *</label>
+                <div>
+                  <label style={{ fontSize: "11px" }}>Nombres *</label>
                   <input
                     type="text"
                     value={nuevoNombres}
                     onChange={(e) => setNuevoNombres(e.target.value)}
-                    placeholder="Ej. Roberto"
-                    maxLength={100}
+                    placeholder="Nombres completos"
+                    required
+                    style={{ width: "100%", padding: "4px 8px" }}
                   />
                 </div>
 
                 <div className="lis-form-row">
-                  <div className="lis-form-group">
-                    <label>Sexo Biológico *</label>
-                    <select value={nuevoSexo} onChange={(e) => setNuevoSexo(e.target.value as "M" | "F")}>
-                      <option value="M">Masculino (M)</option>
-                      <option value="F">Femenino (F)</option>
+                  <div>
+                    <label style={{ fontSize: "11px" }}>Sexo *</label>
+                    <select
+                      value={nuevoSexo}
+                      onChange={(e) => setNuevoSexo(e.target.value as "M" | "F")}
+                      style={{ width: "100%", padding: "4px 8px" }}
+                    >
+                      <option value="M">M</option>
+                      <option value="F">F</option>
                     </select>
                   </div>
-                  <div className="lis-form-group">
-                    <label>Fecha de Nacimiento</label>
+                  <div>
+                    <label style={{ fontSize: "11px" }}>Fecha Nac. o Edad</label>
                     <input
                       type="date"
                       value={nuevoFechaNac}
                       onChange={(e) => setNuevoFechaNac(e.target.value)}
                       max={new Date().toISOString().split("T")[0]}
-                    />
-                  </div>
-                  <div className="lis-form-group">
-                    <label>Teléfono</label>
-                    <input
-                      type="text"
-                      value={nuevoTelefono}
-                      onChange={(e) => setNuevoTelefono(e.target.value)}
-                      placeholder="Ej. 70012345"
-                      maxLength={30}
+                      style={{ width: "100%", padding: "4px 8px" }}
                     />
                   </div>
                 </div>
+
+                {!nuevoFechaNac && (
+                  <div>
+                    <label style={{ fontSize: "11px" }}>Edad en Años *</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={130}
+                      value={nuevoEdadAnios}
+                      onChange={(e) => setNuevoEdadAnios(e.target.value)}
+                      placeholder="0 - 130"
+                      style={{ width: "100%", padding: "4px 8px" }}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>
+        </section>
 
-          {/* SECCIÓN 2: PERFIL Y ESTUDIOS */}
-          <div className="lis-wizard-card">
-            <div className="lis-wizard-header">
-              <span className="lis-step-number">2</span>
-              <div style={{ flex: 1, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <h3>Estudios Clínicos Solicitados</h3>
-                <span className="lis-chip lis-chip-primary">
-                  {estudiosSeleccionados.size} estudio(s) seleccionado(s)
-                </span>
-              </div>
-            </div>
+        {/* ZONA 2: ESTUDIOS */}
+        <section className="lis-zone-card" aria-label="Zona 2: Estudios">
+          <div className="lis-zone-header">
+            <h2 className="lis-zone-title">
+              <span className="lis-zone-badge">2</span>
+              Estudios
+            </h2>
+            <span className="lis-chip lis-chip-primary">
+              {estudiosSeleccionados.size} seleccionados
+            </span>
+          </div>
 
-            {/* Selector de Perfil Opcional */}
-            <div className="lis-form-group">
-              <label htmlFor="select-perfil-asistente">Preseleccionar desde Perfil Clínico (Opcional)</label>
-              <select
-                id="select-perfil-asistente"
-                value={perfilSeleccionado}
-                onChange={(e) => handleSeleccionarPerfil(e.target.value)}
-              >
-                <option value="">— Selección Personalizada / Ningún perfil —</option>
-                {perfilesCatalogo.map((perf) => (
-                  <option key={perf.codigo} value={perf.codigo}>
-                    {perf.nombre} ({perf.codigo})
-                  </option>
-                ))}
-              </select>
-              <span className="lis-input-hint">
-                Al elegir un perfil se preseleccionan sus análisis, pudiendo marcar o desmarcar estudios de forma libre.
+          <div className="lis-zone-content">
+            {/* Botones de perfil rápido */}
+            <div className="lis-perfiles-bar">
+              <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-muted)", marginRight: "4px" }}>
+                Perfiles:
               </span>
+              {perfilesCatalogo.map((perf) => (
+                <button
+                  key={perf.codigo}
+                  type="button"
+                  onClick={() => handleSeleccionarPerfil(perf.codigo)}
+                  className={`lis-perfil-btn ${perfilActivo === perf.codigo ? "active" : ""}`}
+                >
+                  {perf.nombre}
+                </button>
+              ))}
+              {estudiosSeleccionados.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEstudiosSeleccionados(new Set());
+                    setGruposInmunosero(new Set());
+                    setPerfilActivo("");
+                  }}
+                  className="lis-btn lis-btn-text lis-btn-sm"
+                  style={{ fontSize: "11.5px" }}
+                >
+                  Limpiar
+                </button>
+              )}
             </div>
 
-            {/* Cuadrícula de 9 Estudios */}
+            {/* Cuadrícula de 9 interruptores compactos */}
             {cargandoCatalogo ? (
-              <p>Cargando estudios del catálogo...</p>
+              <p className="lis-text-muted" style={{ fontSize: "13px" }}>
+                Cargando catálogo…
+              </p>
             ) : (
-              <div className="lis-study-selection-grid">
+              <div className="lis-estudios-switches-grid">
                 {estudiosCatalogo.map((est) => {
-                  const estaMarcado = estudiosSeleccionados.has(est.codigo);
+                  const seleccionado = estudiosSeleccionados.has(est.codigo);
                   return (
-                    <div
-                      key={est.codigo}
-                      className={`lis-study-checkbox-card ${estaMarcado ? "selected" : ""}`}
-                      onClick={() => handleToggleEstudio(est.codigo)}
-                    >
-                      <div style={{ display: "flex", alignItems: "flex-start", gap: "0.6rem" }}>
-                        <input
-                          type="checkbox"
-                          checked={estaMarcado}
-                          onChange={() => {}} // Manejado por el onClick del contenedor
-                          style={{ marginTop: "3px", width: "17px", height: "17px" }}
-                        />
-                        <div style={{ flex: 1 }}>
-                          <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-muted)" }}>
-                            {est.codigo}
-                          </span>
-                          <div style={{ fontWeight: 600, fontSize: "0.95rem" }}>{est.nombre}</div>
-                          <span style={{ fontSize: "0.75rem", color: "var(--primary)" }}>{est.categoria}</span>
+                    <React.Fragment key={est.codigo}>
+                      <div
+                        className={`lis-estudio-switch-item ${seleccionado ? "selected" : ""}`}
+                        onClick={() => handleToggleEstudio(est.codigo)}
+                        role="checkbox"
+                        aria-checked={seleccionado}
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === " " || e.key === "Enter") {
+                            e.preventDefault();
+                            handleToggleEstudio(est.codigo);
+                          }
+                        }}
+                      >
+                        <div className="lis-switch-header">
+                          <span className="lis-switch-code">{est.codigo}</span>
+                          <input
+                            type="checkbox"
+                            checked={seleccionado}
+                            onChange={() => {}}
+                            tabIndex={-1}
+                            style={{ cursor: "pointer" }}
+                          />
                         </div>
+                        <span className="lis-switch-name">{est.nombre}</span>
                       </div>
 
-                      {/* Grupos de Inmunoserología (Etiqueta provisional D2-09) */}
-                      {est.seleccion_parcial && est.grupos && estaMarcado && (
-                        <div
-                          className="lis-study-groups-box"
-                          onClick={(e) => e.stopPropagation()} // Evita togglear el estudio al hacer clic en un grupo
-                        >
-                          <strong style={{ fontSize: "0.8rem", color: "var(--text-main)" }}>
-                            Selección de Grupos (D2-09):
-                          </strong>
-                          {est.grupos.map((g) => {
-                            const grupoMarcado = gruposInmunosero.has(g.codigo);
-                            const etiquetaHumanizada = g.codigo.replace(/_/g, " ");
-                            const nombresParametros = g.parametros.map((p) => p.nombre).join(", ");
-                            return (
-                              <label
-                                key={g.codigo}
-                                style={{
-                                  display: "flex",
-                                  flexDirection: "column",
-                                  cursor: "pointer",
-                                  padding: "0.3rem 0.4rem",
-                                  backgroundColor: grupoMarcado ? "#f3e8ff" : "#f8fafc",
-                                  borderRadius: "4px",
-                                  border: "1px solid",
-                                  borderColor: grupoMarcado ? "#d8b4fe" : "#e2e8f0",
-                                }}
-                              >
-                                <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={grupoMarcado}
-                                    onChange={() => handleToggleGrupoInmunosero(g.codigo)}
-                                  />
-                                  <span style={{ fontWeight: 600, fontSize: "0.85rem" }}>
-                                    {etiquetaHumanizada}
+                      {/* Inmunoserología desplegada en línea */}
+                      {est.codigo === "INMUNOSEROLOGIA" && seleccionado && est.grupos && (
+                        <div className="lis-inmunosero-dropdown">
+                          <span style={{ fontSize: "12px", fontWeight: 700, color: "#701a75" }}>
+                            Grupos de Inmunoserología:
+                          </span>
+                          <div className="lis-inmunosero-grid">
+                            {est.grupos.map((g) => {
+                              const marcado = gruposInmunosero.has(g.codigo);
+                              const etiquetaHumanizada = g.codigo.replace(/_/g, " ");
+                              const paramsTexto = g.parametros.map((p) => p.nombre).join(", ");
+                              return (
+                                <label
+                                  key={g.codigo}
+                                  className={`lis-inmunosero-item ${marcado ? "selected" : ""}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={marcado}
+                                      onChange={() => handleToggleGrupoInmunosero(g.codigo)}
+                                    />
+                                    <strong>{etiquetaHumanizada}</strong>
+                                  </div>
+                                  <span style={{ fontSize: "10.5px", color: "var(--text-muted)", paddingLeft: "20px" }}>
+                                    {paramsTexto}
                                   </span>
-                                </div>
-                                <span className="lis-input-hint" style={{ paddingLeft: "1.4rem", fontSize: "0.72rem" }}>
-                                  {nombresParametros}
-                                </span>
-                              </label>
-                            );
-                          })}
+                                </label>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
-                    </div>
+                    </React.Fragment>
                   );
                 })}
               </div>
             )}
           </div>
+        </section>
 
-          {/* SECCIÓN 3: DATOS DE LA ORDEN */}
-          <div className="lis-wizard-card">
-            <div className="lis-wizard-header">
-              <span className="lis-step-number">3</span>
-              <h3>Detalles Clínicos de la Solicitud</h3>
+        {/* ZONA 3: DATOS DE LA ORDEN Y CONTINUAR */}
+        <section className="lis-zone-card" aria-label="Zona 3: Datos de la orden">
+          <div className="lis-zone-header">
+            <h2 className="lis-zone-title">
+              <span className="lis-zone-badge">3</span>
+              Datos de la orden
+            </h2>
+          </div>
+
+          <div className="lis-zone-content">
+            <div className="lis-form-group">
+              <label htmlFor="input-origen" style={{ fontSize: "12px" }}>
+                Origen de solicitud
+              </label>
+              <input
+                id="input-origen"
+                type="text"
+                value={origenSolicitud}
+                onChange={(e) => setOrigenSolicitud(e.target.value)}
+                placeholder="Ej. Emergencias, Consulta..."
+                maxLength={100}
+                style={{ padding: "5px 8px", fontSize: "13px" }}
+              />
             </div>
 
-            <div className="lis-form-row">
-              <div className="lis-form-group">
-                <label htmlFor="input-origen-orden">Origen de Solicitud</label>
-                <input
-                  id="input-origen-orden"
-                  type="text"
-                  value={origenSolicitud}
-                  onChange={(e) => setOrigenSolicitud(e.target.value)}
-                  placeholder="Ej. Emergencias, Consulta Externa, Sala 3..."
-                  maxLength={100}
-                />
-              </div>
+            <div className="lis-form-group">
+              <label htmlFor="input-medico" style={{ fontSize: "12px" }}>
+                Médico solicitante
+              </label>
+              <input
+                id="input-medico"
+                type="text"
+                value={medicoSolicitante}
+                onChange={(e) => setMedicoSolicitante(e.target.value)}
+                placeholder="Ej. Dr. Mario Torres"
+                maxLength={150}
+                style={{ padding: "5px 8px", fontSize: "13px" }}
+              />
+            </div>
 
-              <div className="lis-form-group">
-                <label htmlFor="input-medico-orden">Médico Solicitante</label>
-                <input
-                  id="input-medico-orden"
-                  type="text"
-                  value={medicoSolicitante}
-                  onChange={(e) => setMedicoSolicitante(e.target.value)}
-                  placeholder="Ej. Dr. Carlos Fernández"
-                  maxLength={150}
-                />
+            <div className="lis-form-group">
+              <label htmlFor="input-pieza" style={{ fontSize: "12px" }}>
+                Pieza / Cama
+              </label>
+              <input
+                id="input-pieza"
+                type="text"
+                value={pieza}
+                onChange={(e) => setPieza(e.target.value)}
+                placeholder="Ej. Sala 2, Cama 4"
+                maxLength={100}
+                style={{ padding: "5px 8px", fontSize: "13px" }}
+              />
+            </div>
+
+            {/* Resumen */}
+            <div className="lis-resumen-box">
+              <div className="lis-resumen-row">
+                <span className="lis-resumen-label">Paciente:</span>
+                <span className="lis-resumen-val">{nombreCompleto}</span>
+              </div>
+              <div className="lis-resumen-row">
+                <span className="lis-resumen-label">Documento:</span>
+                <span className="lis-resumen-val">{ciMostrado}</span>
+              </div>
+              <div className="lis-resumen-row">
+                <span className="lis-resumen-label">Estudios:</span>
+                <span className="lis-resumen-val">{estudiosSeleccionados.size} seleccionados</span>
               </div>
             </div>
 
-            <div className="lis-form-row">
-              <div className="lis-form-group">
-                <label htmlFor="input-pieza-orden">Pieza / Cama</label>
-                <input
-                  id="input-pieza-orden"
-                  type="text"
-                  value={pieza}
-                  onChange={(e) => setPieza(e.target.value)}
-                  placeholder="Ej. Cama 12B"
-                  maxLength={100}
-                />
+            {/* Botón Continuar */}
+            <div style={{ marginTop: "auto", paddingTop: "8px" }}>
+              <button
+                type="submit"
+                className="lis-btn lis-btn-primary lis-btn-block"
+                style={{ height: "42px", fontSize: "15px", fontWeight: 700 }}
+                disabled={!puedeContinuar}
+              >
+                Continuar →
+              </button>
+            </div>
+          </div>
+        </section>
+      </form>
+
+      {/* VENTANA MODAL DE CONFIRMACIÓN (§6.4) */}
+      {modalAbierto && (
+        <div className="lis-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-confirm-title">
+          <div className="lis-modal-card lis-modal-confirmacion">
+            <div className="lis-modal-header">
+              <h3 id="modal-confirm-title">Confirmar y Crear Orden</h3>
+              <button
+                type="button"
+                className="lis-modal-close"
+                onClick={() => !guardando && setModalAbierto(false)}
+                disabled={guardando}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="lis-modal-body">
+              {/* Tarjeta de Bloqueo por Duplicidad (409 ORDEN_DUPLICADA_EN_CURSO) */}
+              {bloqueoDuplicado && (
+                <div className="lis-alert lis-alert-error" role="alert">
+                  <div>
+                    <strong>Trabajo clínico duplicado en curso</strong>
+                    <p style={{ marginTop: "4px", fontSize: "12.5px" }}>
+                      El colega bioquímico <strong>{bloqueoDuplicado.autor.nombres} {bloqueoDuplicado.autor.apellido_paterno}</strong> ya
+                      posee una orden activa que cubre los estudios solicitados:
+                    </p>
+                    <div className="lis-chips-container" style={{ marginTop: "6px" }}>
+                      {bloqueoDuplicado.estudios.map((c) => (
+                        <span key={c} className="lis-chip">
+                          {c}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {errorModal && !bloqueoDuplicado && (
+                <div className="lis-alert lis-alert-error" role="alert">
+                  {errorModal}
+                </div>
+              )}
+
+              {/* Datos de Confirmación */}
+              <div className="lis-confirm-summary-grid">
+                <span className="lis-confirm-label">CI:</span>
+                <span className="lis-confirm-value">{ciMostrado}</span>
+
+                <span className="lis-confirm-label">Paciente:</span>
+                <span className="lis-confirm-value">{nombreCompleto}</span>
+
+                <span className="lis-confirm-label">Edad:</span>
+                <span className="lis-confirm-value">
+                  {edadAniosCalculada !== null ? `${edadAniosCalculada} años` : "No registrada"}
+                </span>
+
+                <span className="lis-confirm-label">Estudios:</span>
+                <div className="lis-chips-container">
+                  {Array.from(estudiosSeleccionados).map((cod) => (
+                    <span key={cod} className="lis-chip lis-chip-primary">
+                      {cod}
+                    </span>
+                  ))}
+                </div>
               </div>
 
-              <div className="lis-form-group">
-                <label htmlFor="input-toma-muestra-orden">Fecha y Hora de Toma de Muestra</label>
+              {/* Fecha y hora de inicio (editable, precargada con ahora; D36-03) */}
+              <div className="lis-form-group" style={{ marginTop: "6px" }}>
+                <label htmlFor="input-hora-inicio-modal">
+                  Fecha y hora de inicio
+                </label>
                 <input
-                  id="input-toma-muestra-orden"
+                  id="input-hora-inicio-modal"
                   type="datetime-local"
-                  value={fechaTomaMuestra}
-                  onChange={(e) => setFechaTomaMuestra(e.target.value)}
+                  value={fechaHoraInicio}
+                  onChange={(e) => setFechaHoraInicio(e.target.value)}
+                  disabled={guardando}
+                  style={{ width: "100%" }}
                 />
+                <span className="lis-input-hint">
+                  Registra el inicio de los estudios en el laboratorio.
+                </span>
               </div>
             </div>
 
-            {/* Regla de Edad D2-08 */}
-            {tieneFechaNacimiento ? (
-              <div style={{ backgroundColor: "#f0f9ff", padding: "0.75rem 1rem", borderRadius: "var(--radius)", border: "1px solid #bae6fd", fontSize: "0.85rem", color: "#0369a1" }}>
-                ℹ️ <strong>Cálculo de Edad Automático (D2-08):</strong> El paciente cuenta con fecha de nacimiento registrada.
-                El servidor calculará automáticamente los años y meses cumplidos al momento de la orden.
-              </div>
-            ) : (
-              <div className="lis-form-row">
-                <div className="lis-form-group">
-                  <label htmlFor="input-edad-anios">
-                    Edad en Años <span style={{ color: "var(--error)" }}>*</span>
-                  </label>
-                  <input
-                    id="input-edad-anios"
-                    type="number"
-                    min={0}
-                    max={130}
-                    value={edadAnios}
-                    onChange={(e) => setEdadAnios(e.target.value)}
-                    placeholder="0 - 130"
-                    required
-                  />
-                  <span className="lis-input-hint">Obligatorio al no tener fecha de nacimiento.</span>
-                </div>
+            <div className="lis-modal-footer">
+              <button
+                type="button"
+                className="lis-btn lis-btn-secondary"
+                onClick={() => setModalAbierto(false)}
+                disabled={guardando}
+              >
+                Volver
+              </button>
 
-                <div className="lis-form-group">
-                  <label htmlFor="input-edad-meses">Edad en Meses (0–11)</label>
-                  <input
-                    id="input-edad-meses"
-                    type="number"
-                    min={0}
-                    max={11}
-                    value={edadMeses}
-                    onChange={(e) => setEdadMeses(e.target.value)}
-                    placeholder="0"
-                  />
-                </div>
-              </div>
-            )}
+              {!bloqueoDuplicado && (
+                <button
+                  ref={botonEmpezarRef}
+                  type="button"
+                  className="lis-btn lis-btn-primary"
+                  onClick={handleEmpezarCalculo}
+                  disabled={guardando}
+                >
+                  {guardando ? "Creando orden…" : "Empezar a calcular"}
+                </button>
+              )}
+            </div>
           </div>
-
-          {/* Botones de Envío */}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "1rem" }}>
-            <Link to="/ordenes" className="lis-btn lis-btn-secondary">
-              Cancelar
-            </Link>
-            <button
-              type="submit"
-              className="lis-btn lis-btn-primary"
-              disabled={enviando || estudiosSeleccionados.size === 0}
-            >
-              {enviando ? "Verificando y Creando..." : "Crear Orden de Laboratorio"}
-            </button>
-          </div>
-        </form>
-      </div>
+        </div>
+      )}
     </div>
   );
 };

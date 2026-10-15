@@ -140,7 +140,7 @@ export const PacienteDetallePage: React.FC = () => {
                 className="lis-btn lis-btn-outline"
                 onClick={() => setModalEditarAbierto(true)}
               >
-                ✏️ Editar Ficha
+                Editar Ficha
               </button>
 
               <button

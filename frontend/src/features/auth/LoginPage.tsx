@@ -69,14 +69,12 @@ export const LoginPage: React.FC = () => {
 
         {errorSesion && (
           <div className="lis-alert lis-alert-warning" role="alert">
-            <span className="lis-alert-icon">⚠️</span>
             <span>{errorSesion}</span>
           </div>
         )}
 
         {errorLocal && (
           <div className="lis-alert lis-alert-error" role="alert">
-            <span className="lis-alert-icon">⛔</span>
             <span>{errorLocal}</span>
           </div>
         )}

@@ -17,6 +17,7 @@ export interface PacienteDetalle {
   sexo: "M" | "F" | string;
   telefono: string | null;
   creado_en: string;
+  pendientes?: number;
 }
 
 export interface PacienteListaResponse {
@@ -54,6 +55,10 @@ export interface ListarPacientesParams {
   q?: string;
   limit?: number;
   offset?: number;
+  sexo?: string;
+  creado_desde?: string;
+  creado_hasta?: string;
+  con_pendientes?: boolean | string;
 }
 
 export async function listarPacientesApi(params: ListarPacientesParams = {}): Promise<PacienteListaResponse> {
@@ -66,6 +71,18 @@ export async function listarPacientesApi(params: ListarPacientesParams = {}): Pr
   }
   if (params.offset !== undefined) {
     query.set("offset", String(params.offset));
+  }
+  if (params.sexo && params.sexo !== "TODOS") {
+    query.set("sexo", params.sexo);
+  }
+  if (params.creado_desde) {
+    query.set("creado_desde", params.creado_desde);
+  }
+  if (params.creado_hasta) {
+    query.set("creado_hasta", params.creado_hasta);
+  }
+  if (params.con_pendientes !== undefined && params.con_pendientes !== false && params.con_pendientes !== "") {
+    query.set("con_pendientes", String(params.con_pendientes));
   }
 
   const endpoint = `/api/pacientes${query.toString() ? `?${query.toString()}` : ""}`;

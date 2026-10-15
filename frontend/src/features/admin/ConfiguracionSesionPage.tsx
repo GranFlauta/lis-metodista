@@ -3,7 +3,7 @@
  * PROMPT_FASE_3_5_CORRECCIONES.md T5 punto 8:
  * - 4 campos con unidades, rango y ayuda breve.
  * - Guarda con confirmación y muestra los valores vigentes.
- * - Sin localStorage ni sessionStorage.
+ * - Sin almacenamiento persistente en cliente (token en memoria).
  * - Diseñado según docs/UX_GUIDE.md (minimalista, funcional, sin emojis).
  */
 

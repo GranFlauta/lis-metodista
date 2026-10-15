@@ -254,7 +254,7 @@ export const UsuariosPage: React.FC = () => {
           className="lis-btn lis-btn-primary"
           onClick={handleAbrirCrear}
         >
-          ➕ Nuevo Usuario
+          + Nuevo Usuario
         </button>
       </div>
 
@@ -584,12 +584,11 @@ export const UsuariosPage: React.FC = () => {
                   className="lis-btn lis-btn-secondary lis-btn-sm"
                   onClick={handleCopiarClave}
                 >
-                  {copiado ? "✓ Copiado" : "📋 Copiar"}
+                  {copiado ? "Copiado" : "Copiar clave"}
                 </button>
               </div>
 
               <div className="lis-alert lis-alert-warning">
-                <span className="lis-alert-icon">⚠️</span>
                 <span>
                   <strong>IMPORTANTE:</strong> Esta contraseña se muestra{" "}
                   <strong>UNA SOLA VEZ</strong>. Debe entregarse al usuario; el sistema le exigirá

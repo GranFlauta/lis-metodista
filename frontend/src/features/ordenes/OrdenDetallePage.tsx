@@ -1,12 +1,10 @@
 /**
- * Vista de Detalle de Orden Clínica (Fase 2 Bloque 5).
- * PROMPT_FASE_2.md §8.3, §9:
+ * Vista de Detalle de Orden Clínica.
  * - Muestra cabecera completa, datos del paciente, estudios solicitados y grupos.
  * - Edición de cabecera (PATCH /api/ordenes/:id) con control de concurrencia optimista (fila_version).
  * - Descarte de borrador (DELETE /api/ordenes/:id / 204) con diálogo de confirmación.
  * - Control estricto de roles: ADMIN solo supervisa (auditoría ADMIN_VE_PRIVADO en backend),
  *   ocultando botones de edición y descarte.
- * - Restricción absoluta: aviso informativo de que captura y cálculos corresponden a Fase 3.
  */
 
 import React, { useCallback, useEffect, useState } from "react";
@@ -223,7 +221,7 @@ export const OrdenDetallePage: React.FC = () => {
             </span>
             {orden.bloqueada && (
               <span className="lis-status-badge lis-status-bloqueada">
-                🔒 Bloqueada por concurrencia
+                Bloqueada por concurrencia
               </span>
             )}
             <span
@@ -247,7 +245,7 @@ export const OrdenDetallePage: React.FC = () => {
             className="lis-btn lis-btn-primary"
             title="Ingresar a la pantalla de captura analítica de resultados"
           >
-            🔬 {esAdmin ? "Ver Captura de Resultados" : "Capturar Resultados"}
+            {esAdmin ? "Ver captura de resultados" : "Capturar resultados"}
           </Link>
 
           {!esAdmin && orden.estado_trabajo !== "PUBLICADA" && !orden.bloqueada && (
@@ -258,7 +256,7 @@ export const OrdenDetallePage: React.FC = () => {
                 onClick={handleAbrirEdicion}
                 title="Editar datos de cabecera (origen, médico, toma de muestra)"
               >
-                ✏️ Editar Cabecera
+                Editar cabecera
               </button>
 
               <button
@@ -267,7 +265,7 @@ export const OrdenDetallePage: React.FC = () => {
                 onClick={() => setModalDescartarAbierto(true)}
                 title="Descartar permanentemente este borrador"
               >
-                🗑️ Descartar Borrador
+                Descartar borrador
               </button>
             </>
           )}
@@ -282,7 +280,7 @@ export const OrdenDetallePage: React.FC = () => {
                 padding: "0.4rem 0.75rem",
               }}
             >
-              🛡️ Modo Auditoría Institucional (Solo Lectura)
+              Modo Auditoría Institucional (Solo Lectura)
             </span>
           )}
         </div>
@@ -498,14 +496,14 @@ export const OrdenDetallePage: React.FC = () => {
         </div>
       </div>
 
-      {/* Tarjeta de Acceso a Captura de Resultados (Fase 3 Habilitada) */}
+      {/* Tarjeta de Acceso a Captura de Resultados */}
       <div className="lis-table-card" style={{ padding: "1.25rem 1.5rem", marginBottom: "1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0" }}>
         <div>
           <h4 style={{ fontSize: "1.05rem", fontWeight: 700, color: "#166534", marginBottom: "0.25rem" }}>
-            🔬 Captura de Determinaciones, Fórmulas Clínicas y Banderas
+            Captura de Determinaciones, Fórmulas Clínicas y Banderas
           </h4>
           <p style={{ margin: 0, fontSize: "0.9rem", color: "#15803d" }}>
-            Módulo activo de la Fase 3: ingrese resultados numéricos, cualitativos, cálculo síncrono en vivo, banderas biológicas por rango y control de completitud.
+            Ingrese resultados numéricos, cualitativos, cálculo síncrono en vivo, banderas biológicas por rango y control de completitud.
           </p>
         </div>
         <Link

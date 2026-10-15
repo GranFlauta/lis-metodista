@@ -1,10 +1,13 @@
 /**
- * Vista Principal de Pacientes (Búsqueda debounce 300ms, tabla paginada y gestión).
- * PROMPT_FASE_2.md §8.2, §9:
- * - Buscador q con debounce de 300 ms (busca en CI, nombres y apellidos).
- * - Paginación con límite y desplazamiento (limit / offset).
- * - Para ADMIN se ocultan los botones de crear y editar.
- * - Acceso a consulta del catálogo clínico.
+ * Vista Principal de Pacientes (Buscar y gestionar).
+ * Implementa PROMPT_FASE_3_6_UX.md §6.6 y docs/UX_GUIDE.md:
+ * - Buscador principal grande con debounce de 300 ms.
+ * - Filtros en una fila: sexo, creado desde/hasta, casilla "Solo con pendientes".
+ * - Tabla densa: CI, nombre completo, edad, sexo, teléfono, etiqueta "Pendiente (n)" (clic -> lista filtrada).
+ * - Acciones por fila: Nueva orden (abre /ordenes/nueva?pacienteId=...), Editar y Ficha.
+ * - Botón "Nuevo paciente" como secundario.
+ * - ADMIN: solo lectura (sin botones de creación ni edición).
+ * - Cero emojis, cero textos de desarrollo, sin almacenamiento en navegador.
  */
 
 import React, { useCallback, useEffect, useState } from "react";
@@ -25,8 +28,13 @@ export const PacientesPage: React.FC = () => {
   const [limit, setLimit] = useState<number>(25);
   const [offset, setOffset] = useState<number>(0);
 
+  // Filtros
   const [busqueda, setBusqueda] = useState<string>("");
   const [busquedaDebounced, setBusquedaDebounced] = useState<string>("");
+  const [filtroSexo, setFiltroSexo] = useState<string>("TODOS");
+  const [creadoDesde, setCreadoDesde] = useState<string>("");
+  const [creadoHasta, setCreadoHasta] = useState<string>("");
+  const [soloPendientes, setSoloPendientes] = useState<boolean>(false);
 
   const [cargando, setCargando] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +44,7 @@ export const PacientesPage: React.FC = () => {
   const [pacienteEditando, setPacienteEditando] = useState<PacienteDetalle | null>(null);
   const [modalCatalogoAbierto, setModalCatalogoAbierto] = useState<boolean>(false);
 
-  // Debounce de 300 ms en el buscador (§9)
+  // Debounce de 300 ms en el buscador (§6.6)
   useEffect(() => {
     const timer = setTimeout(() => {
       setBusquedaDebounced(busqueda);
@@ -45,15 +53,19 @@ export const PacientesPage: React.FC = () => {
     return () => clearTimeout(timer);
   }, [busqueda]);
 
-  // Cargar lista de pacientes
+  // Cargar lista de pacientes con filtros B1
   const cargarPacientes = useCallback(async () => {
     setCargando(true);
     setError(null);
     try {
       const data = await listarPacientesApi({
-        q: busquedaDebounced,
+        q: busquedaDebounced || undefined,
         limit,
         offset,
+        sexo: filtroSexo !== "TODOS" ? filtroSexo : undefined,
+        creado_desde: creadoDesde || undefined,
+        creado_hasta: creadoHasta || undefined,
+        con_pendientes: soloPendientes ? true : undefined,
       });
       setPacientes(data.items);
       setTotal(data.total);
@@ -66,7 +78,7 @@ export const PacientesPage: React.FC = () => {
     } finally {
       setCargando(false);
     }
-  }, [busquedaDebounced, limit, offset]);
+  }, [busquedaDebounced, limit, offset, filtroSexo, creadoDesde, creadoHasta, soloPendientes]);
 
   useEffect(() => {
     cargarPacientes();
@@ -105,6 +117,18 @@ export const PacientesPage: React.FC = () => {
     return `${Math.max(0, anios)} años`;
   };
 
+  const limpiarFiltros = () => {
+    setBusqueda("");
+    setFiltroSexo("TODOS");
+    setCreadoDesde("");
+    setCreadoHasta("");
+    setSoloPendientes(false);
+    setOffset(0);
+  };
+
+  const hayFiltrosActivos =
+    Boolean(busqueda) || filtroSexo !== "TODOS" || Boolean(creadoDesde) || Boolean(creadoHasta) || soloPendientes;
+
   return (
     <div className="lis-page-container">
       {/* Cabecera */}
@@ -112,28 +136,28 @@ export const PacientesPage: React.FC = () => {
         <div>
           <h2>Gestión de Pacientes</h2>
           <p className="lis-page-sub">
-            Registro clínico oficial de pacientes, documentos de identidad y fichas médicas.
+            Búsqueda, gestión y expedientes clínicos de pacientes.
           </p>
         </div>
 
-        <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
           <button
             type="button"
             className="lis-btn lis-btn-outline"
             onClick={() => setModalCatalogoAbierto(true)}
             title="Ver catálogo de estudios y perfiles clínicos"
           >
-            📋 Ver Catálogo
+            Ver catálogo
           </button>
 
           {!esAdmin && (
             <button
               type="button"
-              className="lis-btn lis-btn-primary"
+              className="lis-btn lis-btn-secondary"
               onClick={handleAbrirCrear}
-              title="Registrar un nuevo paciente clínico"
+              title="Registrar paciente (acción secundaria)"
             >
-              + Nuevo Paciente
+              + Nuevo paciente
             </button>
           )}
         </div>
@@ -142,130 +166,241 @@ export const PacientesPage: React.FC = () => {
       {/* Alerta de error */}
       {error && <div className="lis-alert lis-alert-error">{error}</div>}
 
-      {/* Barra de Filtros y Búsqueda */}
-      <div className="lis-filter-bar">
-        <div className="lis-filter-group lis-search-input">
-          <label htmlFor="input-busqueda-pacientes">Buscar Paciente (CI o Apellidos / Nombres)</label>
+      {/* Barra de Filtros y Búsqueda en una fila (§6.6) */}
+      <div
+        className="lis-filter-bar"
+        style={{
+          display: "flex",
+          gap: "8px",
+          alignItems: "flex-end",
+          flexWrap: "wrap",
+          padding: "8px 12px",
+        }}
+      >
+        <div className="lis-filter-group" style={{ flex: "1 1 240px", minWidth: "200px" }}>
+          <label htmlFor="input-busqueda-pacientes">Buscador principal</label>
           <input
             id="input-busqueda-pacientes"
             type="search"
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
-            placeholder="Escriba número de carnet, apellido o nombre..."
-            aria-label="Buscar pacientes por carnet o nombre"
+            placeholder="Buscar por CI, apellidos o nombres…"
+            aria-label="Buscar pacientes por documento o nombre"
+            className="lis-input"
+            style={{ height: "32px", fontSize: "13.5px" }}
           />
         </div>
 
-        {busqueda && (
+        <div className="lis-filter-group" style={{ width: "110px" }}>
+          <label htmlFor="select-filtro-sexo">Sexo</label>
+          <select
+            id="select-filtro-sexo"
+            value={filtroSexo}
+            onChange={(e) => {
+              setFiltroSexo(e.target.value);
+              setOffset(0);
+            }}
+            className="lis-input"
+            style={{ height: "32px", fontSize: "13px" }}
+          >
+            <option value="TODOS">Todos</option>
+            <option value="M">Masculino</option>
+            <option value="F">Femenino</option>
+          </select>
+        </div>
+
+        <div className="lis-filter-group" style={{ width: "130px" }}>
+          <label htmlFor="input-creado-desde">Creado desde</label>
+          <input
+            id="input-creado-desde"
+            type="date"
+            value={creadoDesde}
+            onChange={(e) => {
+              setCreadoDesde(e.target.value);
+              setOffset(0);
+            }}
+            className="lis-input"
+            style={{ height: "32px", fontSize: "12.5px" }}
+          />
+        </div>
+
+        <div className="lis-filter-group" style={{ width: "130px" }}>
+          <label htmlFor="input-creado-hasta">Creado hasta</label>
+          <input
+            id="input-creado-hasta"
+            type="date"
+            value={creadoHasta}
+            onChange={(e) => {
+              setCreadoHasta(e.target.value);
+              setOffset(0);
+            }}
+            className="lis-input"
+            style={{ height: "32px", fontSize: "12.5px" }}
+          />
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", height: "32px", padding: "0 4px" }}>
+          <label
+            htmlFor="check-solo-pendientes"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              cursor: "pointer",
+              fontSize: "13px",
+              fontWeight: 600,
+              userSelect: "none",
+            }}
+          >
+            <input
+              id="check-solo-pendientes"
+              type="checkbox"
+              checked={soloPendientes}
+              onChange={(e) => {
+                setSoloPendientes(e.target.checked);
+                setOffset(0);
+              }}
+            />
+            Solo con pendientes
+          </label>
+        </div>
+
+        {hayFiltrosActivos && (
           <button
             type="button"
             className="lis-btn lis-btn-text"
-            onClick={() => setBusqueda("")}
-            style={{ alignSelf: "flex-end" }}
+            onClick={limpiarFiltros}
+            style={{ height: "32px", fontSize: "12.5px" }}
           >
-            Limpiar búsqueda
+            Limpiar filtros
           </button>
         )}
       </div>
 
-      {/* Tabla Paginada de Pacientes */}
+      {/* Tabla Densa de Pacientes */}
       <div className="lis-table-card">
         <div className="lis-table-responsive">
-          <table className="lis-table">
+          <table className="lis-table" style={{ fontSize: "13.5px" }}>
             <thead>
               <tr>
-                <th style={{ width: "160px" }}>Documento (CI)</th>
-                <th>Apellidos y Nombres</th>
-                <th style={{ width: "110px" }}>Sexo</th>
-                <th>Fecha Nac. / Edad</th>
-                <th>Teléfono</th>
-                <th style={{ width: "180px", textAlign: "right" }}>Acciones</th>
+                <th style={{ width: "130px" }}>CI</th>
+                <th>Nombre completo</th>
+                <th style={{ width: "95px" }}>Edad</th>
+                <th style={{ width: "85px" }}>Sexo</th>
+                <th style={{ width: "115px" }}>Teléfono</th>
+                <th style={{ width: "130px" }}>Pendientes</th>
+                <th style={{ width: "210px", textAlign: "right" }}>Acciones</th>
               </tr>
             </thead>
             <tbody>
               {cargando ? (
                 <tr>
-                  <td colSpan={6} className="lis-table-loading">
+                  <td colSpan={7} className="lis-table-loading">
                     <div className="lis-spinner" style={{ margin: "0 auto 0.5rem" }} />
-                    <p>Consultando base de pacientes...</p>
+                    <p>Consultando base de pacientes…</p>
                   </td>
                 </tr>
               ) : pacientes.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="lis-table-empty">
+                  <td colSpan={7} className="lis-table-empty">
                     <p style={{ fontWeight: 600, fontSize: "1rem" }}>No se encontraron pacientes registrados.</p>
                     <p className="lis-text-muted" style={{ marginTop: "0.25rem" }}>
-                      {busqueda ? "Intente con otro término de búsqueda." : "Haga clic en '+ Nuevo Paciente' para dar de alta al primero."}
+                      {hayFiltrosActivos
+                        ? "Intente ajustando los filtros de búsqueda."
+                        : "Use '+ Nuevo paciente' o inicie una 'Nueva orden' para registrar."}
                     </p>
                   </td>
                 </tr>
               ) : (
-                pacientes.map((p) => (
-                  <tr key={p.id}>
-                    <td>
-                      {p.sin_ci ? (
-                        <span className="lis-badge-sin-ci">Sin CI</span>
-                      ) : (
-                        <span className="lis-cell-bold" style={{ letterSpacing: "0.03em" }}>
-                          {p.ci}
-                          {p.ci_complemento && (
-                            <span style={{ color: "var(--primary)", marginLeft: "2px" }}>
-                              -{p.ci_complemento}
-                            </span>
-                          )}
+                pacientes.map((p) => {
+                  const cantPendientes = p.pendientes || 0;
+                  return (
+                    <tr key={p.id}>
+                      <td>
+                        {p.sin_ci ? (
+                          <span className="lis-badge-sin-ci">Sin CI</span>
+                        ) : (
+                          <span className="lis-cell-bold" style={{ letterSpacing: "0.02em" }}>
+                            {p.ci}
+                            {p.ci_complemento && (
+                              <span style={{ color: "var(--primary)", marginLeft: "2px" }}>
+                                -{p.ci_complemento}
+                              </span>
+                            )}
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <span className="lis-cell-bold">
+                          {p.apellido_paterno} {p.apellido_materno || ""},{" "}
                         </span>
-                      )}
-                    </td>
-                    <td>
-                      <span className="lis-cell-bold">
-                        {p.apellido_paterno} {p.apellido_materno || ""},
-                      </span>{" "}
-                      <span>{p.nombres}</span>
-                    </td>
-                    <td>
-                      <span
-                        className="lis-status-badge"
-                        style={{
-                          backgroundColor: p.sexo === "M" ? "#e0f2fe" : "#fce7f3",
-                          color: p.sexo === "M" ? "#0369a1" : "#be185d",
-                        }}
-                      >
-                        {p.sexo === "M" ? "Masculino" : "Femenino"}
-                      </span>
-                    </td>
-                    <td>
-                      <div>{p.fecha_nacimiento || "—"}</div>
-                      {p.fecha_nacimiento && (
-                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                          ({calcularEdadTexto(p.fecha_nacimiento)})
-                        </span>
-                      )}
-                    </td>
-                    <td>{p.telefono || "—"}</td>
-                    <td className="lis-text-right">
-                      <div className="lis-actions-cell">
-                        <button
-                          type="button"
-                          className="lis-btn lis-btn-outline lis-btn-sm"
-                          onClick={() => navigate(`/pacientes/${p.id}`)}
-                          title="Ver Ficha Clínica del Paciente"
+                        <span>{p.nombres}</span>
+                      </td>
+                      <td>{calcularEdadTexto(p.fecha_nacimiento)}</td>
+                      <td>
+                        <span
+                          className="lis-status-badge"
+                          style={{
+                            backgroundColor: p.sexo === "M" ? "#e0f2fe" : "#fce7f3",
+                            color: p.sexo === "M" ? "#0369a1" : "#be185d",
+                            fontSize: "11.5px",
+                            padding: "1px 6px",
+                          }}
                         >
-                          Ficha
-                        </button>
-                        {!esAdmin && (
+                          {p.sexo === "M" ? "M" : "F"}
+                        </span>
+                      </td>
+                      <td>{p.telefono || "—"}</td>
+                      <td>
+                        {cantPendientes > 0 ? (
+                          <button
+                            type="button"
+                            className="lis-flag-badge lis-flag-alto"
+                            onClick={() => navigate(`/ordenes?id_paciente=${p.id}&estado=INCOMPLETO`)}
+                            style={{ cursor: "pointer", border: "none", textDecoration: "none" }}
+                            title={`Ver ${cantPendientes} orden(es) pendiente(s) de este paciente`}
+                          >
+                            Pendiente ({cantPendientes})
+                          </button>
+                        ) : (
+                          <span style={{ color: "var(--text-muted)", fontSize: "12px" }}>0 pendientes</span>
+                        )}
+                      </td>
+                      <td className="lis-text-right">
+                        <div className="lis-actions-cell" style={{ justifyContent: "flex-end", gap: "4px" }}>
+                          {!esAdmin && (
+                            <button
+                              type="button"
+                              className="lis-btn lis-btn-primary lis-btn-sm"
+                              onClick={() => navigate(`/ordenes/nueva?pacienteId=${p.id}`)}
+                              title="Crear nueva orden para este paciente"
+                            >
+                              Nueva orden
+                            </button>
+                          )}
+                          {!esAdmin && (
+                            <button
+                              type="button"
+                              className="lis-btn lis-btn-outline lis-btn-sm"
+                              onClick={() => handleAbrirEditar(p)}
+                              title="Editar datos del paciente"
+                            >
+                              Editar
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="lis-btn lis-btn-secondary lis-btn-sm"
-                            onClick={() => handleAbrirEditar(p)}
-                            title="Editar Datos del Paciente"
+                            onClick={() => navigate(`/pacientes/${p.id}`)}
+                            title="Ver ficha e historial de órdenes"
                           >
-                            Editar
+                            Ficha
                           </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -336,3 +471,5 @@ export const PacientesPage: React.FC = () => {
     </div>
   );
 };
+
+export default PacientesPage;

@@ -1,27 +1,52 @@
 /**
  * Estilos visuales del sistema LIS Laboratorio Clínico.
- * PROMPT_FASE_1.md §9: CSS propio, accesible, alto contraste y foco visible.
+ * Basado estrictamente en docs/UX_GUIDE.md (diseño minimalista, funcional, fiel a Excel).
  */
 
 :root {
+  /* Paleta neutra (grises) + un color de acento azul */
   --primary: #0284c7;
   --primary-hover: #0369a1;
   --primary-focus: rgba(2, 132, 199, 0.35);
+  --primary-light: #e0f2fe;
+
   --bg-page: #f8fafc;
   --bg-card: #ffffff;
   --text-main: #0f172a;
   --text-muted: #64748b;
   --border-color: #cbd5e1;
+  --border-light: #e2e8f0;
+
+  /* Banderas analíticas y estados (UX_GUIDE.md §4) */
+  --flag-alto-bg: #fee2e2;
+  --flag-alto-text: #991b1b;
+  --flag-bajo-bg: #dbeafe;
+  --flag-bajo-text: #1e40af;
+  --flag-normal-bg: #dcfce7;
+  --flag-normal-text: #166534;
+  --flag-unconfirmed-bg: #fef3c7;
+  --flag-unconfirmed-text: #92400e;
+
   --success: #15803d;
   --success-bg: #f0fdf4;
   --warning: #b45309;
   --warning-bg: #fefce8;
   --error: #b91c1c;
   --error-bg: #fef2f2;
-  --radius: 8px;
+
+  /* Tokens tipográficos y dimensiones (UX_GUIDE.md §5) */
   --font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-base: 14px;
+  --font-table: 13px;
+  --font-title: 17px;
+  --radius: 4px;
+  --transition: 150ms ease;
+
+  --sidebar-w-expanded: 220px;
+  --sidebar-w-collapsed: 56px;
 }
 
+/* --- Reseteo base --- */
 * {
   box-sizing: border-box;
   margin: 0;
@@ -30,179 +55,445 @@
 
 body {
   font-family: var(--font-family);
+  font-size: var(--font-base);
   background-color: var(--bg-page);
   color: var(--text-main);
-  line-height: 1.5;
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Foco accesible obligatorio */
+/* Foco accesible obligatorio (contorno de 2px) */
 input:focus-visible,
 select:focus-visible,
+textarea:focus-visible,
 button:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
 
-/* --- Layout Principal --- */
-.lis-app-layout {
+/* --- Estructura General de la Aplicación --- */
+.lis-app-container {
   display: flex;
-  flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background-color: var(--bg-page);
 }
 
-.lis-navbar {
+/* --- Menú lateral izquierdo desplegable (§6.1) --- */
+.lis-sidebar {
+  display: flex;
+  flex-direction: column;
+  background-color: #0f172a;
+  color: #94a3b8;
+  height: 100vh;
+  flex-shrink: 0;
+  transition: width var(--transition);
+  z-index: 50;
+  border-right: 1px solid #1e293b;
+  user-select: none;
+}
+
+.lis-sidebar-expanded {
+  width: var(--sidebar-w-expanded);
+}
+
+.lis-sidebar-collapsed {
+  width: var(--sidebar-w-collapsed);
+}
+
+.lis-sidebar-header {
+  height: 48px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background-color: var(--bg-card);
-  border-bottom: 1px solid var(--border-color);
-  padding: 0.75rem 1.5rem;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  padding: 0 12px;
+  border-bottom: 1px solid #1e293b;
 }
 
-.lis-navbar-brand {
+.lis-sidebar-brand {
   display: flex;
   align-items: center;
-}
-
-.lis-logo-link {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  gap: 8px;
   text-decoration: none;
-  color: var(--text-main);
-  font-weight: 700;
-  font-size: 1.15rem;
+  color: #ffffff;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
-.lis-logo-icon {
-  font-size: 1.3rem;
-}
-
-.lis-nav-menu {
-  display: flex;
-  align-items: center;
-  gap: 1.25rem;
-}
-
-.lis-nav-item {
-  text-decoration: none;
-  color: var(--text-muted);
-  font-weight: 500;
-  font-size: 0.95rem;
-  padding: 0.35rem 0.65rem;
+.lis-sidebar-logo {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: #38bdf8;
+  background-color: #0369a1;
+  padding: 2px 6px;
   border-radius: var(--radius);
-  transition: all 0.2s;
 }
 
-.lis-nav-item:hover:not(.lis-nav-disabled) {
-  color: var(--primary);
-  background-color: #f1f5f9;
+.lis-sidebar-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #f8fafc;
 }
 
-.lis-nav-item.active {
-  color: var(--primary);
-  font-weight: 600;
-  background-color: #e0f2fe;
-}
-
-.lis-nav-disabled {
+.lis-sidebar-toggle-btn {
+  background: transparent;
+  border: none;
   color: #94a3b8;
-  cursor: not-allowed;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: var(--radius);
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  justify-content: center;
+  transition: background-color var(--transition), color var(--transition);
 }
 
-.lis-badge-soon {
-  font-size: 0.7rem;
-  background-color: #f1f5f9;
-  color: #64748b;
-  padding: 0.15rem 0.4rem;
-  border-radius: 4px;
-  border: 1px solid #cbd5e1;
+.lis-sidebar-toggle-btn:hover {
+  background-color: #1e293b;
+  color: #ffffff;
 }
 
-.lis-navbar-user {
-  display: flex;
-  align-items: center;
-  gap: 1.25rem;
-}
-
-.lis-user-info {
+.lis-sidebar-nav {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  gap: 4px;
+  padding: 10px 8px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
-.lis-user-name {
-  font-weight: 600;
-  font-size: 0.9rem;
+.lis-sidebar-section-divider {
+  height: 1px;
+  background-color: #1e293b;
+  margin: 8px 4px;
 }
 
-.lis-role-badge {
-  font-size: 0.75rem;
+.lis-sidebar-section-title {
+  font-size: 11px;
   font-weight: 700;
-  padding: 0.1rem 0.5rem;
-  border-radius: 12px;
   text-transform: uppercase;
+  color: #64748b;
+  padding: 4px 10px;
+  letter-spacing: 0.05em;
 }
 
-.lis-role-admin {
-  background-color: #ede9fe;
-  color: #6d28d9;
-}
-
-.lis-role-bioquimico {
-  background-color: #e0f2fe;
-  color: #0369a1;
-}
-
-.lis-user-actions {
+.lis-sidebar-link {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  color: #94a3b8;
+  text-decoration: none;
+  font-size: 13.5px;
+  font-weight: 500;
+  transition: background-color var(--transition), color var(--transition);
+  position: relative;
+  white-space: nowrap;
 }
 
-.lis-main-content {
+.lis-sidebar-link:hover {
+  background-color: #1e293b;
+  color: #ffffff;
+}
+
+.lis-sidebar-link.active {
+  background-color: #1e293b;
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+/* Entrada destacada para Nueva orden */
+.lis-sidebar-link-featured {
+  background-color: #0369a1;
+  color: #ffffff !important;
+  font-weight: 600;
+}
+
+.lis-sidebar-link-featured:hover {
+  background-color: #0284c7;
+}
+
+.lis-sidebar-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.lis-sidebar-text {
   flex: 1;
-  padding: 1.75rem 2rem;
-  max-width: 1280px;
-  margin: 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lis-sidebar-badge {
+  background-color: #b45309;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  line-height: 1.2;
+}
+
+.lis-sidebar-badge-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #f59e0b;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+/* Pie del menú lateral */
+.lis-sidebar-footer {
+  padding: 10px;
+  border-top: 1px solid #1e293b;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lis-sidebar-user-block {
+  padding: 4px 6px;
+  overflow: hidden;
+}
+
+.lis-sidebar-user-name {
+  color: #f8fafc;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lis-sidebar-user-role {
+  margin-top: 2px;
+}
+
+.lis-role-badge-mini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.lis-sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.lis-sidebar-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-decoration: none;
+  transition: all var(--transition);
+}
+
+.lis-sidebar-action-btn:hover {
+  background-color: #1e293b;
+  color: #ffffff;
+}
+
+.lis-sidebar-logout-btn:hover {
+  color: #f87171;
+}
+
+/* --- Área principal y Barra superior mínima --- */
+.lis-main-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.lis-topbar {
+  height: 44px;
+  min-height: 44px;
+  background-color: #ffffff;
+  border-bottom: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  z-index: 10;
+}
+
+.lis-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.lis-topbar-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.lis-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.lis-topbar-system-name {
+  font-weight: 500;
+}
+
+.lis-content-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+/* --- Pantalla de Inicio (§6.2) --- */
+.lis-home-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 100%;
+}
+
+.lis-quick-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.lis-btn-quick {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-card);
+  color: var(--text-main);
+  cursor: pointer;
+  text-decoration: none;
+  transition: all var(--transition);
+  min-width: 180px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.lis-btn-quick:hover {
+  background-color: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.lis-btn-quick-primary {
+  background-color: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+}
+
+.lis-btn-quick-primary:hover {
+  background-color: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+
+.lis-recientes-panel {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   width: 100%;
 }
 
-.lis-footer {
-  border-top: 1px solid var(--border-color);
-  background-color: var(--bg-card);
-  padding: 0.85rem 2rem;
-  font-size: 0.85rem;
+.lis-recientes-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.lis-recientes-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.lis-empty-state {
+  padding: 36px 16px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.lis-empty-state-message {
+  font-size: 14px;
   color: var(--text-muted);
 }
 
-.lis-footer-content {
-  max-width: 1280px;
-  margin: 0 auto;
+.lis-cell-paciente {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 2px;
 }
 
-/* --- Botones --- */
+.lis-paciente-nombre {
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--text-main);
+}
+
+.lis-paciente-ci {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* --- Botones Clínicos Universales --- */
 .lis-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.4rem;
-  padding: 0.5rem 1rem;
-  font-size: 0.9rem;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 13.5px;
   font-weight: 600;
   border-radius: var(--radius);
   border: 1px solid transparent;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--transition);
   text-decoration: none;
+  line-height: 1.4;
 }
 
 .lis-btn-primary {
@@ -217,7 +508,7 @@ a:focus-visible {
 .lis-btn-secondary {
   background-color: #f1f5f9;
   color: #334155;
-  border-color: #cbd5e1;
+  border-color: var(--border-color);
 }
 
 .lis-btn-secondary:hover:not(:disabled) {
@@ -238,7 +529,7 @@ a:focus-visible {
   background-color: transparent;
   color: var(--primary);
   border: none;
-  padding: 0.35rem 0.6rem;
+  padding: 4px 8px;
 }
 
 .lis-btn-danger {
@@ -262,8 +553,8 @@ a:focus-visible {
 }
 
 .lis-btn-sm {
-  padding: 0.25rem 0.55rem;
-  font-size: 0.8rem;
+  padding: 3px 8px;
+  font-size: 12.5px;
 }
 
 .lis-btn-block {
@@ -279,30 +570,31 @@ a:focus-visible {
 .lis-form {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 12px;
 }
 
 .lis-form-group {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 4px;
 }
 
 .lis-form-group label {
-  font-size: 0.875rem;
+  font-size: 13px;
   font-weight: 600;
   color: #334155;
 }
 
 .lis-form-group input,
-.lis-form-group select {
-  padding: 0.55rem 0.75rem;
-  font-size: 0.95rem;
+.lis-form-group select,
+.lis-form-group textarea {
+  padding: 6px 10px;
+  font-size: 13.5px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
   background-color: #ffffff;
   color: var(--text-main);
-  transition: border-color 0.15s;
+  transition: border-color var(--transition);
 }
 
 .lis-form-group input:disabled,
@@ -312,239 +604,54 @@ a:focus-visible {
 }
 
 .lis-input-hint {
-  font-size: 0.75rem;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
 .lis-form-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
 }
 
 .lis-form-actions {
   display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
+  gap: 8px;
+  margin-top: 8px;
 }
 
-/* --- Alertas --- */
-.lis-alert {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  border-radius: var(--radius);
-  font-size: 0.875rem;
-  line-height: 1.4;
-  border: 1px solid transparent;
-}
-
-.lis-alert-error {
-  background-color: var(--error-bg);
-  color: var(--error);
-  border-color: #fecaca;
-}
-
-.lis-alert-warning {
-  background-color: var(--warning-bg);
-  color: var(--warning);
-  border-color: #fde68a;
-}
-
-.lis-alert-success {
-  background-color: var(--success-bg);
-  color: var(--success);
-  border-color: #bbf7d0;
-}
-
-/* --- Tarjeta de Login y Centrado --- */
-.lis-login-container {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100vh;
-  padding: 1.5rem;
-  background-color: #f1f5f9;
-}
-
-.lis-login-card {
-  width: 100%;
-  max-width: 440px;
-  background-color: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 2rem;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08);
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-.lis-brand-header {
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.3rem;
-}
-
-.lis-brand-badge {
-  font-size: 0.8rem;
-  font-weight: 800;
-  letter-spacing: 0.05em;
-  background-color: #e0f2fe;
-  color: var(--primary);
-  padding: 0.2rem 0.6rem;
-  border-radius: 16px;
-  margin-bottom: 0.25rem;
-}
-
-.lis-brand-header h1 {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--text-main);
-}
-
-.lis-brand-sub {
-  font-size: 0.875rem;
-  color: var(--text-muted);
-}
-
-.lis-text-warning {
-  color: var(--warning);
-  font-weight: 600;
-}
-
-.lis-login-footer {
-  text-align: center;
-  color: var(--text-muted);
-  border-top: 1px solid #f1f5f9;
-  padding-top: 1rem;
-}
-
-/* --- Pantalla de Carga --- */
-.lis-loading-screen {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100vh;
-  gap: 1rem;
-  color: var(--text-muted);
-}
-
-.lis-spinner {
-  width: 40px;
-  height: 40px;
-  border: 4px solid #e2e8f0;
-  border-top-color: var(--primary);
-  border-radius: 50%;
-  animation: lis-spin 0.8s linear infinite;
-}
-
-@keyframes lis-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* --- Páginas y Contenedores --- */
-.lis-page-container {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-.lis-page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.lis-page-header h2 {
-  font-size: 1.5rem;
-  font-weight: 700;
-}
-
-.lis-page-sub {
-  font-size: 0.9rem;
-  color: var(--text-muted);
-}
-
-/* --- Barra de Filtros --- */
-.lis-filter-bar {
-  display: flex;
-  align-items: flex-end;
-  gap: 1rem;
-  background-color: var(--bg-card);
-  padding: 1rem;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius);
-  flex-wrap: wrap;
-}
-
-.lis-filter-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.lis-filter-group label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-}
-
-.lis-filter-group input,
-.lis-filter-group select {
-  padding: 0.45rem 0.65rem;
-  font-size: 0.9rem;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius);
-  background-color: #ffffff;
-}
-
-.lis-search-input {
-  flex: 1;
-  min-width: 240px;
-}
-
-/* --- Tabla de Datos --- */
+/* --- Tablas Clínicas Densas (§1 y §5 de UX_GUIDE) --- */
 .lis-table-card {
   background-color: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
   overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .lis-table-responsive {
   overflow-x: auto;
+  width: 100%;
 }
 
 .lis-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: var(--font-table);
   text-align: left;
 }
 
 .lis-table th {
   background-color: #f8fafc;
-  padding: 0.75rem 1rem;
+  padding: 6px 10px;
   font-weight: 600;
   color: #475569;
   border-bottom: 1px solid var(--border-color);
+  font-size: 12.5px;
 }
 
 .lis-table td {
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid #f1f5f9;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-light);
   vertical-align: middle;
 }
 
@@ -552,9 +659,9 @@ a:focus-visible {
   background-color: #f8fafc;
 }
 
-.lis-row-inactive {
-  background-color: #fafafa;
-  opacity: 0.8;
+.lis-table-dense th,
+.lis-table-dense td {
+  padding: 5px 8px;
 }
 
 .lis-cell-bold {
@@ -568,14 +675,26 @@ a:focus-visible {
 .lis-actions-cell {
   display: flex;
   justify-content: flex-end;
-  gap: 0.35rem;
+  gap: 4px;
 }
 
+.lis-table-loading,
+.lis-table-empty {
+  padding: 32px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13.5px;
+}
+
+/* --- Estados e Insignias --- */
 .lis-status-badge {
-  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
   font-weight: 700;
-  padding: 0.15rem 0.5rem;
+  padding: 2px 8px;
   border-radius: 12px;
+  line-height: 1.3;
 }
 
 .lis-status-active {
@@ -590,294 +709,6 @@ a:focus-visible {
   border: 1px solid #fecaca;
 }
 
-.lis-table-loading,
-.lis-table-empty {
-  padding: 3rem 1rem;
-  text-align: center;
-  color: var(--text-muted);
-}
-
-/* --- Modales --- */
-.lis-modal-overlay {
-  position: fixed;
-  inset: 0;
-  background-color: rgba(15, 23, 42, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1.5rem;
-  z-index: 100;
-  backdrop-filter: blur(2px);
-}
-
-.lis-modal-card {
-  background-color: var(--bg-card);
-  border-radius: 12px;
-  width: 100%;
-  max-width: 580px;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  max-height: 90vh;
-}
-
-.lis-modal-alert {
-  max-width: 460px;
-}
-
-.lis-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1.25rem 1.5rem;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.lis-modal-header h3 {
-  font-size: 1.2rem;
-  font-weight: 700;
-}
-
-.lis-modal-close {
-  background: transparent;
-  border: none;
-  font-size: 1.25rem;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 0.25rem;
-}
-
-.lis-modal-body {
-  padding: 1.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  overflow-y: auto;
-}
-
-.lis-modal-card form {
-  padding: 1.5rem;
-  overflow-y: auto;
-}
-
-.lis-modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.75rem;
-  padding-top: 1rem;
-  border-top: 1px solid #f1f5f9;
-  margin-top: 0.5rem;
-}
-
-/* Caja de contraseña temporal */
-.lis-temp-password-box {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background-color: #f1f5f9;
-  border: 2px dashed #94a3b8;
-  padding: 0.75rem 1rem;
-  border-radius: var(--radius);
-}
-
-.lis-temp-code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 1.3rem;
-  font-weight: 700;
-  color: #0f172a;
-  letter-spacing: 0.08em;
-}
-
-/* --- Pantalla de Bienvenida / Home --- */
-.lis-welcome-card {
-  background-color: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 2rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-}
-
-.lis-welcome-header {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-
-.lis-welcome-icon {
-  font-size: 2.5rem;
-}
-
-.lis-welcome-cards-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1.25rem;
-  margin-top: 1.5rem;
-}
-
-.lis-action-card {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius);
-  padding: 1.5rem;
-  background-color: #f8fafc;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  align-items: flex-start;
-}
-
-.lis-action-card h3 {
-  font-size: 1.1rem;
-  font-weight: 700;
-}
-
-.lis-action-card p {
-  color: var(--text-muted);
-  font-size: 0.9rem;
-  flex: 1;
-}
-
-.lis-card-muted {
-  background-color: #ffffff;
-}
-
-/* --- Paginación Accesible --- */
-.lis-pagination-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.85rem 1.25rem;
-  background-color: var(--bg-card);
-  border-top: 1px solid var(--border-color);
-  flex-wrap: wrap;
-  gap: 0.75rem;
-}
-
-.lis-pagination-info {
-  font-size: 0.875rem;
-  color: var(--text-muted);
-}
-
-.lis-pagination-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.lis-pagination-select {
-  padding: 0.3rem 0.5rem;
-  font-size: 0.85rem;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius);
-  background: #ffffff;
-}
-
-/* --- Banner de Conflicto 409 con botón de navegación --- */
-.lis-conflict-banner {
-  background-color: #fffbeb;
-  border: 1px solid #fde68a;
-  border-left: 4px solid var(--warning);
-  padding: 1rem;
-  border-radius: var(--radius);
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-  color: #92400e;
-}
-
-.lis-conflict-banner h4 {
-  font-size: 0.95rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.lis-conflict-actions {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.25rem;
-}
-
-/* --- Ficha Clínica del Paciente --- */
-.lis-patient-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  gap: 1rem;
-}
-
-.lis-patient-summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 1.25rem;
-  background-color: var(--bg-card);
-  padding: 1.5rem;
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-}
-
-.lis-info-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.lis-info-label {
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.lis-info-value {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--text-main);
-}
-
-/* --- Catálogo Clínico Modal / Visor --- */
-.lis-catalog-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1rem;
-}
-
-.lis-catalog-card {
-  background: #f8fafc;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius);
-  padding: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.lis-catalog-tag {
-  display: inline-block;
-  font-size: 0.7rem;
-  font-weight: 700;
-  background-color: #e0f2fe;
-  color: #0369a1;
-  padding: 0.15rem 0.5rem;
-  border-radius: 12px;
-  align-self: flex-start;
-}
-
-.lis-badge-sin-ci {
-  background-color: #fef3c7;
-  color: #92400e;
-  border: 1px solid #fde68a;
-  font-size: 0.75rem;
-  font-weight: 700;
-  padding: 0.15rem 0.5rem;
-  border-radius: 12px;
-}
-
-/* --- Estados de Órdenes Clínicas --- */
 .lis-status-incompleto {
   background-color: #fefce8;
   color: #a16207;
@@ -902,23 +733,42 @@ a:focus-visible {
   border: 1px solid #fecaca;
 }
 
+.lis-role-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.lis-role-admin {
+  background-color: #ede9fe;
+  color: #6d28d9;
+}
+
+.lis-role-bioquimico {
+  background-color: #e0f2fe;
+  color: #0369a1;
+}
+
 /* --- Chips de Estudios y Grupos --- */
 .lis-chips-container {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: 4px;
 }
 
 .lis-chip {
   display: inline-flex;
   align-items: center;
-  font-size: 0.75rem;
+  font-size: 11.5px;
   font-weight: 700;
-  padding: 0.15rem 0.5rem;
-  border-radius: 6px;
+  padding: 2px 6px;
+  border-radius: var(--radius);
   background-color: #e2e8f0;
   color: #334155;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--border-color);
 }
 
 .lis-chip-primary {
@@ -927,160 +777,322 @@ a:focus-visible {
   border-color: #bae6fd;
 }
 
-.lis-chip-group {
-  background-color: #ede9fe;
-  color: #6d28d9;
-  border-color: #ddd6fe;
-  font-size: 0.7rem;
-}
-
-/* --- Asistente de Creación de Órdenes (Wizard) --- */
-.lis-wizard-container {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-  max-width: 900px;
-  margin: 0 auto;
-  width: 100%;
-}
-
-.lis-wizard-card {
-  background-color: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 1.5rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-.lis-wizard-header {
-  display: flex;
+/* --- Banderas Analíticas (UX_GUIDE.md §4) --- */
+.lis-flag-badge {
+  display: inline-flex;
   align-items: center;
-  gap: 0.75rem;
-  border-bottom: 1px solid var(--border-color);
-  padding-bottom: 0.75rem;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
-.lis-step-number {
+.lis-flag-alto {
+  background-color: var(--flag-alto-bg);
+  color: var(--flag-alto-text);
+  border: 1px solid #fca5a5;
+}
+
+.lis-flag-bajo {
+  background-color: var(--flag-bajo-bg);
+  color: var(--flag-bajo-text);
+  border: 1px solid #93c5fd;
+}
+
+.lis-flag-normal {
+  background-color: var(--flag-normal-bg);
+  color: var(--flag-normal-text);
+  border: 1px solid #86efac;
+}
+
+.lis-flag-sin-confirmar {
+  background-color: var(--flag-unconfirmed-bg);
+  color: var(--flag-unconfirmed-text);
+  border: 1px solid #fde68a;
+}
+
+/* --- Alertas del Sistema --- */
+.lis-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 13.5px;
+  line-height: 1.4;
+  border: 1px solid transparent;
+}
+
+.lis-alert-error {
+  background-color: var(--error-bg);
+  color: var(--error);
+  border-color: #fecaca;
+}
+
+.lis-alert-warning {
+  background-color: var(--warning-bg);
+  color: var(--warning);
+  border-color: #fde68a;
+}
+
+.lis-alert-success {
+  background-color: var(--success-bg);
+  color: var(--success);
+  border-color: #bbf7d0;
+}
+
+/* --- Modales --- */
+.lis-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background-color: var(--primary);
-  color: #ffffff;
-  font-size: 0.85rem;
-  font-weight: 700;
+  padding: 16px;
+  z-index: 100;
 }
 
-.lis-wizard-header h3 {
-  font-size: 1.15rem;
+.lis-modal-card {
+  background-color: var(--bg-card);
+  border-radius: var(--radius);
+  width: 100%;
+  max-width: 540px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 90vh;
+  border: 1px solid var(--border-color);
+}
+
+.lis-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.lis-modal-header h3 {
+  font-size: 15px;
   font-weight: 700;
   margin: 0;
 }
 
-.lis-study-selection-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 0.85rem;
+.lis-modal-close {
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
 }
 
-.lis-study-checkbox-card {
+.lis-modal-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.lis-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-light);
+}
+
+/* --- Tarjeta de Login Centrada --- */
+.lis-login-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 16px;
+  background-color: #f1f5f9;
+}
+
+.lis-login-card {
+  width: 100%;
+  max-width: 400px;
+  background-color: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
-  padding: 0.85rem 1rem;
-  background-color: #f8fafc;
+  padding: 24px;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  transition: all 0.2s;
-  cursor: pointer;
+  gap: 16px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
 }
 
-.lis-study-checkbox-card:hover {
-  background-color: #f1f5f9;
-  border-color: #94a3b8;
-}
-
-.lis-study-checkbox-card.selected {
-  background-color: #f0f9ff;
-  border-color: var(--primary);
-}
-
-.lis-study-groups-box {
-  background-color: #ffffff;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  padding: 0.65rem 0.85rem;
-  margin-top: 0.35rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-/* --- Banner de Advertencia de Solapamiento (D2-04/D2-05) --- */
-.lis-overlap-banner {
-  background-color: #fefce8;
-  border: 1px solid #fef08a;
-  border-left: 5px solid #ca8a04;
-  border-radius: var(--radius);
-  padding: 1rem 1.25rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  color: #713f12;
-}
-
-.lis-overlap-banner h4 {
-  font-size: 1rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-/* --- Modal / Alerta de Bloqueo por Duplicidad (409 ORDEN_DUPLICADA_EN_CURSO) --- */
-.lis-block-duplicate-card {
-  background-color: #fef2f2;
-  border: 1px solid #fecaca;
-  border-left: 5px solid #dc2626;
-  border-radius: var(--radius);
-  padding: 1.25rem;
-  color: #991b1b;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.lis-block-duplicate-card h4 {
-  font-size: 1.1rem;
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-/* --- Caja de Información de Fase 3 (Captura de Resultados) --- */
-.lis-phase3-notice {
-  background-color: #f8fafc;
-  border: 1px dashed var(--border-color);
-  border-radius: var(--radius);
-  padding: 1.5rem;
+.lis-brand-header {
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.lis-brand-badge {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  background-color: #e0f2fe;
+  color: var(--primary);
+  padding: 2px 8px;
+  border-radius: var(--radius);
+}
+
+.lis-brand-header h1 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.lis-brand-sub {
+  font-size: 13px;
   color: var(--text-muted);
 }
 
-/* ==========================================================================
-   FASE 3: Captura de Resultados, Vista Previa en Vivo y Banderas Analíticas
-   ========================================================================== */
+.lis-login-footer {
+  text-align: center;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border-light);
+  padding-top: 12px;
+  font-size: 12px;
+}
 
+/* --- Páginas, Filtros y Paginación --- */
+.lis-page-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.lis-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.lis-page-header h2 {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.lis-filter-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  background-color: var(--bg-card);
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  flex-wrap: wrap;
+}
+
+.lis-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lis-filter-group label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.lis-filter-group input,
+.lis-filter-group select {
+  padding: 5px 8px;
+  font-size: 13px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  background-color: #ffffff;
+}
+
+.lis-pagination-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: var(--bg-card);
+  border-top: 1px solid var(--border-color);
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.lis-pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* --- Clases auxiliares para componentes existentes --- */
+.lis-temp-password-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #f1f5f9;
+  border: 2px dashed #94a3b8;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+}
+
+.lis-temp-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: 0.08em;
+}
+
+.lis-patient-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  background-color: var(--bg-card);
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+}
+
+.lis-info-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lis-info-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.lis-info-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+/* Captura de Determinaciones (compatibilidad) */
 .lis-captura-grid {
   display: grid;
   grid-template-columns: 1fr 420px;
-  gap: 1.5rem;
+  gap: 16px;
   align-items: start;
 }
 
@@ -1090,151 +1102,632 @@ a:focus-visible {
   }
 }
 
-.lis-captura-form-col {
-  min-width: 0;
-}
-
-.lis-captura-preview-col {
-  min-width: 0;
-}
-
-.lis-sticky-preview-panel {
-  position: sticky;
-  top: 1rem;
-  background-color: #ffffff;
-  border-radius: var(--radius);
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
-}
-
-.lis-study-capture-card {
-  border-left: 4px solid var(--primary);
-}
-
 .lis-param-fields-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
 }
 
 .lis-param-field-box {
   background-color: #ffffff;
   border: 1px solid var(--border-color);
-  border-radius: 6px;
-  padding: 0.75rem 0.85rem;
+  border-radius: var(--radius);
+  padding: 8px;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  gap: 4px;
 }
 
-.lis-param-field-box:focus-within {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 2px var(--primary-focus);
+.lis-study-selection-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
 }
 
-.lis-param-field-box.is-calculado {
+.lis-study-checkbox-card {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 8px 12px;
   background-color: #f8fafc;
-  border: 1px dashed #94a3b8;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
 }
 
-.lis-param-field-header {
+.lis-study-checkbox-card.selected {
+  background-color: #f0f9ff;
+  border-color: var(--primary);
+}
+
+/* --- Nueva Orden en 3 Zonas sin Scroll (§6.3) --- */
+.lis-nueva-orden-grid {
+  display: grid;
+  grid-template-columns: 310px 1fr 280px;
+  gap: 12px;
+  height: calc(100vh - 72px);
+  max-height: calc(100vh - 72px);
+  overflow: hidden;
+}
+
+@media (max-width: 1200px) {
+  .lis-nueva-orden-grid {
+    grid-template-columns: 1fr;
+    height: auto;
+    max-height: none;
+    overflow-y: auto;
+  }
+}
+
+.lis-zone-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.lis-zone-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
 }
 
-.lis-param-field-label {
-  font-size: 0.88rem;
-  font-weight: 600;
+.lis-zone-title {
+  font-size: 14px;
+  font-weight: 700;
   color: var(--text-main);
-  line-height: 1.25;
-}
-
-.lis-param-input-wrapper {
-  margin: 0.15rem 0;
-}
-
-.lis-param-readonly-display {
-  padding: 0.4rem 0.5rem;
-  background-color: #f1f5f9;
-  border-radius: 4px;
-  min-height: 38px;
   display: flex;
   align-items: center;
+  gap: 6px;
+  margin: 0;
 }
 
-.lis-param-field-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  border-top: 1px solid #f1f5f9;
-  padding-top: 0.35rem;
-  margin-top: 0.2rem;
-}
-
-/* Insignias de Bandera (Icono + Texto con Alto Contraste) */
-.lis-flag-badge {
+.lis-zone-badge {
+  background-color: var(--primary);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0.15rem 0.5rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  line-height: 1.2;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
-.lis-flag-alto {
-  background-color: #fee2e2;
-  color: #991b1b;
-  border: 1px solid #f87171;
+.lis-zone-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
 }
 
-.lis-flag-bajo {
-  background-color: #dbeafe;
-  color: #1e40af;
-  border: 1px solid #60a5fa;
+/* Buscador desplegable de pacientes */
+.lis-paciente-search-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.lis-flag-normal {
-  background-color: #dcfce7;
-  color: #166534;
-  border: 1px solid #86efac;
+.lis-dropdown-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background-color: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 40;
+  margin-top: 2px;
 }
 
-/* Resaltado de Filas en la Tabla de Vista Previa */
-.lis-preview-table .row-flag-alto {
-  background-color: #fef2f2;
+.lis-dropdown-item {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-light);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  transition: background-color var(--transition);
 }
 
-.lis-preview-table .row-flag-bajo {
+.lis-dropdown-item:last-child {
+  border-bottom: none;
+}
+
+.lis-dropdown-item:hover,
+.lis-dropdown-item:focus {
   background-color: #f0f9ff;
 }
 
-/* Botón interactivo de parámetro pendiente */
-.lis-chip-pending {
-  background-color: #fef08a;
-  color: #854d0e;
-  border: 1px solid #eab308;
-  font-size: 0.72rem;
+/* Resumen compacto de paciente elegido */
+.lis-paciente-compact-box {
+  background-color: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lis-paciente-compact-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lis-paciente-compact-nombre {
   font-weight: 700;
+  font-size: 13.5px;
+  color: #14532d;
+}
+
+.lis-paciente-compact-meta {
+  font-size: 12px;
+  color: #166534;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Formulario nuevo paciente compacto */
+.lis-nuevo-paciente-form {
+  background-color: #f8fafc;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.lis-nuevo-paciente-form .lis-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* Zona 2: Perfiles e Interruptores de estudios */
+.lis-perfiles-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-bottom: 4px;
+}
+
+.lis-perfil-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  background-color: #f1f5f9;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  color: #334155;
   cursor: pointer;
-  padding: 0.2rem 0.5rem;
-  border-radius: 4px;
-  transition: all 0.15s;
+  transition: all var(--transition);
 }
 
-.lis-chip-pending:hover {
-  background-color: #fde047;
-  transform: translateY(-1px);
+.lis-perfil-btn:hover {
+  background-color: #e2e8f0;
+  border-color: #94a3b8;
 }
 
-.lis-chip-pending:focus-visible {
+.lis-perfil-btn.active {
+  background-color: #e0f2fe;
+  border-color: var(--primary);
+  color: #0369a1;
+}
+
+.lis-estudios-switches-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 6px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.lis-estudio-switch-item {
+  background-color: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  cursor: pointer;
+  transition: all var(--transition);
+  user-select: none;
+}
+
+.lis-estudio-switch-item:hover {
+  background-color: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.lis-estudio-switch-item.selected {
+  background-color: #f0f9ff;
+  border-color: var(--primary);
+}
+
+.lis-switch-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.lis-switch-code {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.lis-switch-name {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.25;
+}
+
+.lis-inmunosero-dropdown {
+  grid-column: 1 / -1;
+  background-color: #fdf4ff;
+  border: 1px solid #f0abfc;
+  border-radius: var(--radius);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lis-inmunosero-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 6px;
+}
+
+.lis-inmunosero-item {
+  background-color: #ffffff;
+  border: 1px solid #e879f9;
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.lis-inmunosero-item.selected {
+  background-color: #fae8ff;
+}
+
+/* Zona 3: Resumen y Continuar */
+.lis-resumen-box {
+  background-color: #f8fafc;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.lis-resumen-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.lis-resumen-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.lis-resumen-val {
+  font-weight: 600;
+  color: var(--text-main);
+  text-align: right;
+}
+
+/* Ventana Modal de Confirmación (§6.4) */
+.lis-modal-confirmacion {
+  max-width: 520px;
+}
+
+.lis-confirm-summary-grid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 8px 12px;
+  font-size: 13.5px;
+  background-color: #f8fafc;
+  padding: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-light);
+}
+
+.lis-confirm-label {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.lis-confirm-value {
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+/* --- Captura Fiel al Excel (§6.5) --- */
+.lis-captura-page {
+  width: 100%;
+  max-width: none;
+  padding: 6px 12px;
+  box-sizing: border-box;
+}
+
+.lis-captura-top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.lis-captura-top-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.lis-captura-layout {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  width: 100%;
+}
+
+@media (max-width: 1100px) {
+  .lis-captura-layout {
+    flex-direction: column;
+  }
+  .lis-captura-hoja,
+  .lis-captura-vista-previa {
+    flex: 1 1 100% !important;
+    max-width: 100% !important;
+  }
+}
+
+.lis-captura-hoja {
+  flex: 1 1 55%;
+  min-width: 0;
+}
+
+.lis-captura-hoja-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 8px;
+  align-items: start;
+}
+
+.lis-captura-vista-previa {
+  flex: 0 0 45%;
+  max-width: 45%;
+  min-width: 0;
+}
+
+.lis-captura-estudio-box {
+  background-color: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.lis-captura-estudio-header {
+  background-color: #f8fafc;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.lis-captura-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.lis-captura-tabla th {
+  padding: 3px 6px;
+  background-color: #f1f5f9;
+  font-weight: 600;
+  font-size: 11.5px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-muted);
+  text-align: left;
+  line-height: 1.2;
+}
+
+.lis-captura-tabla td {
+  padding: 2px 6px;
+  height: 28px;
+  max-height: 32px;
+  line-height: 24px;
+  vertical-align: middle;
+  border-bottom: 1px solid #f1f5f9;
+  box-sizing: border-box;
+}
+
+.lis-captura-input {
+  width: 100%;
+  height: 24px;
+  padding: 1px 6px;
+  font-size: 13px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  background-color: #ffffff;
+  color: var(--text-main);
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.lis-captura-input:focus {
   outline: 2px solid var(--primary);
-  outline-offset: 1px;
+  outline-offset: -1px;
 }
 
+.lis-captura-input.is-numeric {
+  text-align: right;
+}
 
+.lis-captura-input.is-diferencial-pct {
+  width: 54px;
+  text-align: right;
+  display: inline-block;
+}
 
+.lis-captura-calc-box {
+  background-color: #f1f5f9;
+  color: var(--text-main);
+  text-align: right;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--radius);
+  border: 1px solid #cbd5e1;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.lis-captura-calc-box.is-diferencial-abs {
+  width: 64px;
+}
+
+.lis-diferencial-cell {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  justify-content: flex-end;
+}
+
+/* Vista Previa Grande (§6.5) */
+.lis-vista-previa-sheet {
+  background-color: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 14px;
+  height: calc(100vh - 120px);
+  overflow-y: auto;
+  font-size: 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-sizing: border-box;
+}
+
+.lis-vista-previa-sheet.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  border-radius: 0;
+  padding: 24px 36px;
+  background-color: #ffffff;
+  overflow-y: auto;
+}
+
+.lis-preview-lab-header {
+  text-align: center;
+  border-bottom: 2px solid var(--border-color);
+  padding-bottom: 6px;
+}
+
+.lis-preview-lab-title {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--text-main);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0;
+}
+
+.lis-preview-lab-sub {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 2px;
+}
+
+.lis-preview-patient-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px 12px;
+  background-color: #f8fafc;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-light);
+  font-size: 13.5px;
+}
+
+.lis-preview-study-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.lis-preview-study-table th {
+  background-color: #f1f5f9;
+  padding: 5px 8px;
+  font-weight: 700;
+  font-size: 13px;
+  border-bottom: 2px solid var(--border-color);
+  color: var(--text-main);
+  text-align: left;
+}
+
+.lis-preview-study-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}

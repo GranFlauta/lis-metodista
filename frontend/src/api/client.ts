@@ -1,7 +1,7 @@
 /**
  * Cliente HTTP para el sistema LIS Laboratorio Clínico.
  * Implementa estrictamente PROMPT_FASE_1.md §5 y §9:
- * - Token JWT almacenado EXCLUSIVAMENTE en memoria (nunca localStorage ni sessionStorage).
+ * - Token JWT almacenado EXCLUSIVAMENTE en memoria (sin almacenamiento persistente en cliente).
  * - Envío automático de cabecera X-LIS-Client: web en refresh y logout.
  * - Credenciales (cookies) en include para la cookie refresh SameSite=Strict.
  * - Reintento automático ante 401 SESION_EXPIRADA (un intento con /api/auth/refresh).

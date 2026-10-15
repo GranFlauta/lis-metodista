@@ -1,7 +1,5 @@
 /**
-/**
- * Cliente de API para captura de resultados, cálculo en vivo y configuración (Fase 3).
- * Implementa PROMPT_FASE_3.md §8:
+ * Cliente de API para captura de resultados, cálculo en vivo y configuración.
  * - GET /api/ordenes/{id}/captura
  * - POST /api/ordenes/{id}/calcular
  * - PUT /api/ordenes/{id}/resultados

@@ -90,14 +90,12 @@ export const CambiarPasswordPage: React.FC = () => {
 
         {errorLocal && (
           <div className="lis-alert lis-alert-error" role="alert">
-            <span className="lis-alert-icon">⛔</span>
             <span>{errorLocal}</span>
           </div>
         )}
 
         {exito && (
           <div className="lis-alert lis-alert-success" role="alert">
-            <span className="lis-alert-icon">✅</span>
             <span>Contraseña actualizada correctamente. Redirigiendo al sistema...</span>
           </div>
         )}

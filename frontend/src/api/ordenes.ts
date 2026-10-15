@@ -87,6 +87,16 @@ export interface OrdenCreadaResponse {
   advertencias: AdvertenciaSolapamiento[];
 }
 
+export interface EstudioDetalleItem {
+  codigo: string;
+  nombre: string;
+}
+
+export interface AutorResumenSimple {
+  nombres: string;
+  apellido_paterno: string;
+}
+
 export interface OrdenListItem {
   id: number;
   paciente: {
@@ -102,6 +112,16 @@ export interface OrdenListItem {
   estudios: string[];
   fecha_solicitud: string;
   creado_en: string;
+  fecha_hora_toma_muestra?: string | null;
+  edad_anios?: number | null;
+  autor: AutorResumenSimple;
+  estudios_detalle: EstudioDetalleItem[];
+}
+
+export interface OrdenesResumenResponse {
+  incompletas: number;
+  completas: number;
+  pendientes: number;
 }
 
 export interface OrdenListaResponse {
@@ -176,5 +196,11 @@ export async function actualizarOrdenApi(id: number, payload: OrdenUpdatePayload
 export async function descartarOrdenApi(id: number): Promise<void> {
   await apiClient<void>(`/api/ordenes/${id}`, {
     method: "DELETE",
+  });
+}
+
+export async function obtenerResumenOrdenesApi(): Promise<OrdenesResumenResponse> {
+  return apiClient<OrdenesResumenResponse>("/api/ordenes/resumen", {
+    method: "GET",
   });
 }
