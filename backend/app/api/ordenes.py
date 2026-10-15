@@ -52,9 +52,12 @@ from app.models.user import Usuario
 from app.schemas.orden import (
     AdvertenciaSolapamiento,
     AutorResumen,
+    AutorResumenSimple,
+    EstudioDetalleItem,
     EstudioItemResponse,
     OrdenCreate,
     OrdenCreadaResponse,
+    OrdenesResumenResponse,
     OrdenListItem,
     OrdenListaResponse,
     OrdenResponse,
@@ -535,6 +538,17 @@ def listar_ordenes(
             apellido_materno=o.paciente.apellido_materno,
         )
         codigos_estudios = [oe.estudio.codigo for oe in o.estudios]
+        estudios_detalle = [
+            EstudioDetalleItem(
+                codigo=oe.estudio.codigo,
+                nombre=oe.estudio.nombre,
+            )
+            for oe in o.estudios
+        ]
+        autor_simple = AutorResumenSimple(
+            nombres=o.autor.nombres if o.autor else "",
+            apellido_paterno=o.autor.apellido_paterno if o.autor else "",
+        )
         items.append(
             OrdenListItem(
                 id=o.id_orden,
@@ -545,6 +559,10 @@ def listar_ordenes(
                 estudios=codigos_estudios,
                 fecha_solicitud=o.fecha_solicitud,
                 creado_en=o.creado_en,
+                fecha_hora_toma_muestra=o.fecha_hora_toma_muestra,
+                edad_anios=o.edad_anios,
+                autor=autor_simple,
+                estudios_detalle=estudios_detalle,
             )
         )
 
@@ -553,6 +571,38 @@ def listar_ordenes(
         total=total,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.get("/resumen", response_model=OrdenesResumenResponse)
+def resumen_ordenes(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(require_auth),
+) -> OrdenesResumenResponse:
+    """
+    Devuelve el conteo de órdenes incompletas, completas y pendientes (Fase 3.6 - B3).
+    BIOQUIMICO: solo del usuario actual.
+    ADMIN: totales de todos (solo conteos, sin auditoría).
+    """
+    es_admin = bool(current_user.rol and getattr(current_user.rol, "nombre", None) == "ADMIN")
+
+    query = db.query(Orden.estado_trabajo, func.count(Orden.id_orden)).filter(
+        Orden.estado_trabajo.in_(["INCOMPLETO", "COMPLETO"])
+    )
+    if not es_admin:
+        query = query.filter(Orden.id_usuario_autor == current_user.id_usuario)
+
+    rows = query.group_by(Orden.estado_trabajo).all()
+    conteos = {estado: count for estado, count in rows}
+
+    incompletas = conteos.get("INCOMPLETO", 0)
+    completas = conteos.get("COMPLETO", 0)
+    pendientes = incompletas + completas
+
+    return OrdenesResumenResponse(
+        incompletas=incompletas,
+        completas=completas,
+        pendientes=pendientes,
     )
 
 

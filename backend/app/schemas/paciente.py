@@ -51,6 +51,7 @@ class PacienteResponse(BaseModel):
     sexo: str
     telefono: Optional[str] = None
     creado_en: datetime
+    pendientes: int = 0
 
 
 class PacienteListaResponse(BaseModel):

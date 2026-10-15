@@ -4,10 +4,12 @@ Ejecutadas con unittest contra PostgreSQL real.
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from app.core.clock import ahora
+from app.models.order import Orden
 from app.models.patient import Paciente
+from app.models.session import LogSeguridad
 from tests.base import IntegrationTestCase
 
 
@@ -385,3 +387,227 @@ class TestPacientesAPI(IntegrationTestCase):
         # Comprobar que sigue existiendo en BD
         p_db = self.db.query(Paciente).filter(Paciente.id_paciente == paciente.id_paciente).first()
         self.assertIsNotNone(p_db)
+
+    # -------------------------------------------------------------
+    # Tests Fase 3.6 - B1 (Tests 1 - 5)
+    # -------------------------------------------------------------
+    def test_b1_01_filtro_sexo_y_fechas_creacion(self) -> None:
+        """1. Filtro sexo y rango de fechas de creación."""
+        self.crear_paciente_test(ci="1110001", nombres="Masculino", sexo="M")
+        self.crear_paciente_test(ci="1110002", nombres="Femenino", sexo="F")
+
+        # Modificar fechas de creación para probar rango de fechas
+        p_antiguo = self.crear_paciente_test(ci="1110003", nombres="Antiguo", sexo="M")
+        p_reciente = self.crear_paciente_test(ci="1110004", nombres="Reciente", sexo="F")
+
+        p_antiguo.creado_en = datetime(2025, 1, 10, 12, 0, 0, tzinfo=timezone.utc)
+        p_reciente.creado_en = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        self.db.commit()
+
+        # Filtro por sexo M
+        res_m = self.client.get("/api/pacientes?sexo=M", headers=self.bio_headers)
+        self.assertEqual(res_m.status_code, 200)
+        sexos_m = [item["sexo"] for item in res_m.json()["items"]]
+        self.assertTrue(all(s == "M" for s in sexos_m))
+        self.assertIn("1110001", [item["ci"] for item in res_m.json()["items"]])
+        self.assertNotIn("1110002", [item["ci"] for item in res_m.json()["items"]])
+
+        # Filtro por sexo F
+        res_f = self.client.get("/api/pacientes?sexo=f", headers=self.bio_headers)
+        self.assertEqual(res_f.status_code, 200)
+        sexos_f = [item["sexo"] for item in res_f.json()["items"]]
+        self.assertTrue(all(s == "F" for s in sexos_f))
+        self.assertIn("1110002", [item["ci"] for item in res_f.json()["items"]])
+        self.assertNotIn("1110001", [item["ci"] for item in res_f.json()["items"]])
+
+        # Filtro por rango de fechas (2025-01-01 a 2025-01-31)
+        res_rango = self.client.get(
+            "/api/pacientes?creado_desde=2025-01-01&creado_hasta=2025-01-31",
+            headers=self.bio_headers,
+        )
+        self.assertEqual(res_rango.status_code, 200)
+        cis_rango = [item["ci"] for item in res_rango.json()["items"]]
+        self.assertIn("1110003", cis_rango)
+        self.assertNotIn("1110004", cis_rango)
+
+    def test_b1_02_con_pendientes_devuelve_solo_propios(self) -> None:
+        """2. con_pendientes=true devuelve solo pacientes con pendientes propios."""
+        bio2 = self.crear_usuario_test(
+            usuario="bioq_pacientes_2",
+            password="PasswordBio123!",
+            rol="BIOQUIMICO",
+            ci="7100099",
+        )
+        login_bio2 = self.client.post(
+            "/api/auth/login",
+            json={"usuario": "bioq_pacientes_2", "password": "PasswordBio123!"},
+        )
+        bio2_headers = {"Authorization": f"Bearer {login_bio2.json()['access_token']}"}
+
+        p1 = self.crear_paciente_test(ci="2220001", nombres="PacienteBio1")
+        p2 = self.crear_paciente_test(ci="2220002", nombres="PacienteBio2")
+        self.crear_paciente_test(ci="2220003", nombres="PacienteSinOrdenes")
+
+        # Bio 1 crea orden en p1
+        r_ord1 = self.client.post(
+            "/api/ordenes",
+            json={"id_paciente": p1.id_paciente, "estudios": [{"codigo": "HEMOGRAMA"}], "edad_anios": 30},
+            headers=self.bio_headers,
+        )
+        self.assertEqual(r_ord1.status_code, 201)
+
+        # Bio 2 crea orden en p2
+        r_ord2 = self.client.post(
+            "/api/ordenes",
+            json={"id_paciente": p2.id_paciente, "estudios": [{"codigo": "HEMOGRAMA"}], "edad_anios": 30},
+            headers=bio2_headers,
+        )
+        self.assertEqual(r_ord2.status_code, 201)
+
+        # Bio 1 consulta con_pendientes=true: solo debe ver p1
+        r_bio1 = self.client.get("/api/pacientes?con_pendientes=true", headers=self.bio_headers)
+        self.assertEqual(r_bio1.status_code, 200)
+        items_bio1 = r_bio1.json()["items"]
+        cis_bio1 = [it["ci"] for it in items_bio1]
+        self.assertIn("2220001", cis_bio1)
+        self.assertNotIn("2220002", cis_bio1)
+        self.assertNotIn("2220003", cis_bio1)
+        p1_item = next(it for it in items_bio1 if it["ci"] == "2220001")
+        self.assertEqual(p1_item["pendientes"], 1)
+
+        # Bio 2 consulta con_pendientes=true: solo debe ver p2
+        r_bio2 = self.client.get("/api/pacientes?con_pendientes=true", headers=bio2_headers)
+        self.assertEqual(r_bio2.status_code, 200)
+        items_bio2 = r_bio2.json()["items"]
+        cis_bio2 = [it["ci"] for it in items_bio2]
+        self.assertIn("2220002", cis_bio2)
+        self.assertNotIn("2220001", cis_bio2)
+
+    def test_b1_03_pendientes_cuenta_incompleto_completo_no_publicada(self) -> None:
+        """3. pendientes cuenta solo INCOMPLETO/COMPLETO (no PUBLICADA) y solo las propias."""
+        bio2 = self.crear_usuario_test(
+            usuario="bioq_pacientes_3",
+            password="PasswordBio123!",
+            rol="BIOQUIMICO",
+            ci="7100098",
+        )
+        login_bio2 = self.client.post(
+            "/api/auth/login",
+            json={"usuario": "bioq_pacientes_3", "password": "PasswordBio123!"},
+        )
+        bio2_headers = {"Authorization": f"Bearer {login_bio2.json()['access_token']}"}
+
+        paciente = self.crear_paciente_test(ci="3330001", nombres="MultiplesEstados")
+
+        # 1. Orden INCOMPLETO de Bio 1
+        r1 = self.client.post(
+            "/api/ordenes",
+            json={"id_paciente": paciente.id_paciente, "estudios": [{"codigo": "HEMOGRAMA"}], "edad_anios": 35},
+            headers=self.bio_headers,
+        )
+        self.assertEqual(r1.status_code, 201)
+
+        # 2. Orden COMPLETO de Bio 1
+        r2 = self.client.post(
+            "/api/ordenes",
+            json={"id_paciente": paciente.id_paciente, "estudios": [{"codigo": "COAGULOGRAMA"}], "edad_anios": 35},
+            headers=self.bio_headers,
+        )
+        self.assertEqual(r2.status_code, 201)
+        id_ord2 = r2.json()["orden"]["id"]
+        o2_db = self.db.query(Orden).filter(Orden.id_orden == id_ord2).first()
+        o2_db.estado_trabajo = "COMPLETO"
+
+        # 3. Orden PUBLICADA de Bio 1 (no debe contarse como pendiente)
+        r3 = self.client.post(
+            "/api/ordenes",
+            json={"id_paciente": paciente.id_paciente, "estudios": [{"codigo": "QUIMICA_SANGUINEA"}], "edad_anios": 35},
+            headers=self.bio_headers,
+        )
+        self.assertEqual(r3.status_code, 201)
+        id_ord3 = r3.json()["orden"]["id"]
+        o3_db = self.db.query(Orden).filter(Orden.id_orden == id_ord3).first()
+        o3_db.estado_trabajo = "PUBLICADA"
+
+        # 4. Orden INCOMPLETO de Bio 2 (ajena, no debe contarse para Bio 1)
+        r4 = self.client.post(
+            "/api/ordenes",
+            json={"id_paciente": paciente.id_paciente, "estudios": [{"codigo": "ELECTROLITOS"}], "edad_anios": 35},
+            headers=bio2_headers,
+        )
+        self.assertEqual(r4.status_code, 201)
+
+        self.db.commit()
+
+        # Bio 1 consulta paciente
+        r_list = self.client.get(f"/api/pacientes?q={paciente.ci}", headers=self.bio_headers)
+        self.assertEqual(r_list.status_code, 200)
+        items = r_list.json()["items"]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["pendientes"], 2)  # INCOMPLETO + COMPLETO propios
+
+    def test_b1_04_admin_pendientes_de_todos_y_audita_una_vez(self) -> None:
+        """4. ADMIN: pendientes de todos y un solo ADMIN_VE_PRIVADO; sin pendientes no audita."""
+        p_con = self.crear_paciente_test(ci="4440001", nombres="ConPendientes")
+        p_sin = self.crear_paciente_test(ci="4440002", nombres="SinPendientes")
+
+        # Crear orden para p_con
+        r_ord = self.client.post(
+            "/api/ordenes",
+            json={"id_paciente": p_con.id_paciente, "estudios": [{"codigo": "HEMOGRAMA"}], "edad_anios": 40},
+            headers=self.bio_headers,
+        )
+        self.assertEqual(r_ord.status_code, 201)
+
+        # 1. Caso sin pendientes: ADMIN busca p_sin expresamente
+        self.db.query(LogSeguridad).delete()
+        self.db.commit()
+
+        r_sin = self.client.get(f"/api/pacientes?q={p_sin.ci}", headers=self.admin_headers)
+        self.assertEqual(r_sin.status_code, 200)
+        items_sin = r_sin.json()["items"]
+        self.assertEqual(len(items_sin), 1)
+        self.assertEqual(items_sin[0]["pendientes"], 0)
+
+        logs_sin = self.db.query(LogSeguridad).filter(LogSeguridad.accion == "ADMIN_VE_PRIVADO").count()
+        self.assertEqual(logs_sin, 0)  # Sin pendientes no audita
+
+        # 2. Caso con pendientes: ADMIN lista y devuelve pacientes con pendientes > 0
+        r_con = self.client.get("/api/pacientes", headers=self.admin_headers)
+        self.assertEqual(r_con.status_code, 200)
+        items_con = r_con.json()["items"]
+        self.assertTrue(any(it["pendientes"] > 0 for it in items_con))
+
+        logs_con = self.db.query(LogSeguridad).filter(LogSeguridad.accion == "ADMIN_VE_PRIVADO").all()
+        self.assertEqual(len(logs_con), 1)  # Registra un solo evento
+        self.assertEqual(logs_con[0].detalle.get("recurso"), "pacientes_pendientes")
+
+    def test_b1_05_filtros_invalidos_devuelven_400(self) -> None:
+        """5. Filtros inválidos → 400."""
+        # Sexo inválido
+        r1 = self.client.get("/api/pacientes?sexo=X", headers=self.bio_headers)
+        self.assertEqual(r1.status_code, 400)
+        self.assertEqual(r1.json()["codigo"], "VALIDACION")
+
+        # creado_desde inválido
+        r2 = self.client.get("/api/pacientes?creado_desde=invalido", headers=self.bio_headers)
+        self.assertEqual(r2.status_code, 400)
+        self.assertEqual(r2.json()["codigo"], "VALIDACION")
+
+        # creado_hasta inválido
+        r3 = self.client.get("/api/pacientes?creado_hasta=2026-99-99", headers=self.bio_headers)
+        self.assertEqual(r3.status_code, 400)
+        self.assertEqual(r3.json()["codigo"], "VALIDACION")
+
+        # creado_desde posterior a creado_hasta
+        r4 = self.client.get(
+            "/api/pacientes?creado_desde=2026-10-15&creado_hasta=2026-10-10",
+            headers=self.bio_headers,
+        )
+        self.assertEqual(r4.status_code, 400)
+        self.assertEqual(r4.json()["codigo"], "VALIDACION")
+
+        # con_pendientes inválido
+        r5 = self.client.get("/api/pacientes?con_pendientes=quizas", headers=self.bio_headers)
+        self.assertEqual(r5.status_code, 400)
+        self.assertEqual(r5.json()["codigo"], "VALIDACION")

@@ -10,16 +10,17 @@ PROMPT_FASE_2.md §8.2:
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Optional
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_auth, require_bioquimico
+from app.api.deps import require_auth, require_bioquimico, registrar_evento_seguridad, obtener_ip_cliente
 from app.core.clock import ahora
 from app.core.database import get_db
 from app.core.errors import ConflictoError, NoEncontradoError, ValidacionError
+from app.models.order import Orden
 from app.models.patient import Paciente
 from app.models.user import Usuario
 from app.schemas.paciente import (
@@ -118,11 +119,16 @@ def comprobar_unicidad_ci(
 
 @router.get("", response_model=PacienteListaResponse)
 def listar_pacientes(
+    request: Request,
     q: Optional[str] = Query(None, description="Búsqueda por CI, nombres o apellidos"),
     limit: int = Query(25, description="Cantidad máxima de registros (1-100)"),
     offset: int = Query(0, description="Desplazamiento (>= 0)"),
+    sexo: Optional[str] = Query(None, description="Filtro por sexo ('M' o 'F')"),
+    creado_desde: Optional[str] = Query(None, description="Fecha de creación desde (YYYY-MM-DD)"),
+    creado_hasta: Optional[str] = Query(None, description="Fecha de creación hasta (YYYY-MM-DD)"),
+    con_pendientes: Optional[str] = Query(None, description="Filtrar solo con órdenes pendientes ('true'/'false')"),
     db: Session = Depends(get_db),
-    _user: Usuario = Depends(require_auth),
+    current_user: Usuario = Depends(require_auth),
 ) -> PacienteListaResponse:
     """
     Lista pacientes con paginación y filtro de búsqueda.
@@ -146,6 +152,58 @@ def listar_pacientes(
             )
         )
 
+    if sexo is not None:
+        s = sexo.strip().upper()
+        if s not in ("M", "F"):
+            raise ValidacionError("El parámetro sexo debe ser 'M' o 'F'.")
+        query = query.filter(Paciente.sexo == s)
+
+    d_desde = None
+    if creado_desde is not None:
+        try:
+            d_desde = date.fromisoformat(creado_desde.strip())
+        except Exception:
+            raise ValidacionError("El parámetro creado_desde debe tener formato YYYY-MM-DD.")
+        dt_desde = datetime(d_desde.year, d_desde.month, d_desde.day, 0, 0, 0, tzinfo=timezone.utc)
+        query = query.filter(Paciente.creado_en >= dt_desde)
+
+    d_hasta = None
+    if creado_hasta is not None:
+        try:
+            d_hasta = date.fromisoformat(creado_hasta.strip())
+        except Exception:
+            raise ValidacionError("El parámetro creado_hasta debe tener formato YYYY-MM-DD.")
+        dt_hasta = datetime(d_hasta.year, d_hasta.month, d_hasta.day, 23, 59, 59, 999999, tzinfo=timezone.utc)
+        query = query.filter(Paciente.creado_en <= dt_hasta)
+
+    if d_desde is not None and d_hasta is not None:
+        if d_desde > d_hasta:
+            raise ValidacionError("El parámetro creado_desde no puede ser posterior a creado_hasta.")
+
+    filtrar_con_pendientes = False
+    if con_pendientes is not None:
+        cp = con_pendientes.strip().lower()
+        if cp in ("true", "1", "t"):
+            filtrar_con_pendientes = True
+        elif cp in ("false", "0", "f"):
+            filtrar_con_pendientes = False
+        else:
+            raise ValidacionError("El parámetro con_pendientes debe ser booleano ('true' o 'false').")
+
+    es_admin = bool(current_user.rol and getattr(current_user.rol, "nombre", None) == "ADMIN")
+
+    pendientes_subq = db.query(func.count(Orden.id_orden)).filter(
+        Orden.id_paciente == Paciente.id_paciente,
+        Orden.estado_trabajo.in_(["INCOMPLETO", "COMPLETO"]),
+    )
+    if not es_admin:
+        pendientes_subq = pendientes_subq.filter(Orden.id_usuario_autor == current_user.id_usuario)
+
+    pendientes_expr = pendientes_subq.correlate(Paciente).scalar_subquery()
+
+    if filtrar_con_pendientes:
+        query = query.filter(pendientes_expr > 0)
+
     # Orden especificado: apellidos, nombres
     query = query.order_by(
         Paciente.apellido_paterno.asc(),
@@ -154,10 +212,32 @@ def listar_pacientes(
     )
 
     total = query.count()
-    items = query.offset(offset).limit(limit).all()
+    results = query.add_columns(pendientes_expr).offset(offset).limit(limit).all()
+
+    items: list[PacienteResponse] = []
+    hay_pendientes_en_resultado = False
+    for row in results:
+        paciente_obj = row[0]
+        pendientes_val = row[1] or 0
+        p_resp = PacienteResponse.model_validate(paciente_obj)
+        p_resp.pendientes = pendientes_val
+        if pendientes_val > 0:
+            hay_pendientes_en_resultado = True
+        items.append(p_resp)
+
+    if es_admin and hay_pendientes_en_resultado:
+        registrar_evento_seguridad(
+            db=db,
+            accion="ADMIN_VE_PRIVADO",
+            id_usuario=current_user.id_usuario,
+            id_objetivo=None,
+            ip=obtener_ip_cliente(request),
+            detalle={"recurso": "pacientes_pendientes"},
+        )
+        db.commit()
 
     return PacienteListaResponse(
-        items=[PacienteResponse.model_validate(p) for p in items],
+        items=items,
         total=total,
         limit=limit,
         offset=offset,
@@ -168,7 +248,7 @@ def listar_pacientes(
 def obtener_paciente(
     id: int,
     db: Session = Depends(get_db),
-    _user: Usuario = Depends(require_auth),
+    current_user: Usuario = Depends(require_auth),
 ) -> PacienteResponse:
     """
     Obtiene la ficha de un paciente por su id.
@@ -177,7 +257,19 @@ def obtener_paciente(
     paciente = db.query(Paciente).filter(Paciente.id_paciente == id).first()
     if not paciente:
         raise NoEncontradoError(f"Paciente con id {id} no encontrado.")
-    return PacienteResponse.model_validate(paciente)
+
+    es_admin = bool(current_user.rol and getattr(current_user.rol, "nombre", None) == "ADMIN")
+    query_pend = db.query(func.count(Orden.id_orden)).filter(
+        Orden.id_paciente == paciente.id_paciente,
+        Orden.estado_trabajo.in_(["INCOMPLETO", "COMPLETO"]),
+    )
+    if not es_admin:
+        query_pend = query_pend.filter(Orden.id_usuario_autor == current_user.id_usuario)
+    pend_count = query_pend.scalar() or 0
+
+    p_resp = PacienteResponse.model_validate(paciente)
+    p_resp.pendientes = pend_count
+    return p_resp
 
 
 @router.post("", response_model=PacienteResponse, status_code=status.HTTP_201_CREATED)

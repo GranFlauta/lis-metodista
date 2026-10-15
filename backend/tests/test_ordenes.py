@@ -927,3 +927,107 @@ class TestOrdenesAPI(IntegrationTestCase):
             self.db.commit()
 
         self.db.rollback()
+
+    # -------------------------------------------------------------
+    # Tests Fase 3.6 - B2 y B3 (Tests 6 y 7)
+    # -------------------------------------------------------------
+    def test_b2_06_nuevos_campos_orden_list_item_y_estudios_intacto(self) -> None:
+        """6. Lista de órdenes: nuevos campos presentes y estudios intacto."""
+        paciente = self.crear_paciente_test(ci="6660001", nombres="B2Test")
+        toma_muestra = ahora().isoformat()
+        payload = {
+            "id_paciente": paciente.id_paciente,
+            "estudios": [{"codigo": "HEMOGRAMA"}, {"codigo": "COAGULOGRAMA"}],
+            "edad_anios": 28,
+            "fecha_hora_toma_muestra": toma_muestra,
+        }
+        res_post = self.client.post("/api/ordenes", json=payload, headers=self.bio_headers)
+        self.assertEqual(res_post.status_code, 201)
+        id_orden = res_post.json()["orden"]["id"]
+
+        res_list = self.client.get("/api/ordenes", headers=self.bio_headers)
+        self.assertEqual(res_list.status_code, 200)
+        items = res_list.json()["items"]
+        orden_item = next((it for it in items if it["id"] == id_orden), None)
+        self.assertIsNotNone(orden_item)
+
+        # Verificar nuevos campos B2
+        self.assertIn("fecha_hora_toma_muestra", orden_item)
+        self.assertIsNotNone(orden_item["fecha_hora_toma_muestra"])
+        self.assertEqual(orden_item["edad_anios"], 28)
+        self.assertIn("autor", orden_item)
+        self.assertEqual(orden_item["autor"]["nombres"], self.bio.nombres)
+        self.assertEqual(orden_item["autor"]["apellido_paterno"], self.bio.apellido_paterno)
+
+        self.assertIn("estudios_detalle", orden_item)
+        codigos_detalle = [ed["codigo"] for ed in orden_item["estudios_detalle"]]
+        self.assertIn("HEMOGRAMA", codigos_detalle)
+        self.assertIn("COAGULOGRAMA", codigos_detalle)
+        for ed in orden_item["estudios_detalle"]:
+            self.assertIn("nombre", ed)
+            self.assertTrue(len(ed["nombre"]) > 0)
+
+        # Verificar que 'estudios' (lista de códigos) sigue intacto
+        self.assertIn("estudios", orden_item)
+        self.assertIsInstance(orden_item["estudios"], list)
+        self.assertIn("HEMOGRAMA", orden_item["estudios"])
+        self.assertIn("COAGULOGRAMA", orden_item["estudios"])
+
+    def test_b3_07_resumen_ordenes_bioquimico_y_admin_sin_token_401(self) -> None:
+        """7. resumen correcto para BIOQUIMICO y ADMIN; sin token → 401."""
+        # Sin token -> 401
+        res_sin_token = self.client.get("/api/ordenes/resumen")
+        self.assertEqual(res_sin_token.status_code, 401)
+
+        p1 = self.crear_paciente_test(ci="7770001", nombres="ResumenP1")
+        p2 = self.crear_paciente_test(ci="7770002", nombres="ResumenP2")
+
+        # Bio 1 crea orden 1 (INCOMPLETO)
+        r1 = self.client.post(
+            "/api/ordenes",
+            json={"id_paciente": p1.id_paciente, "estudios": [{"codigo": "HEMOGRAMA"}], "edad_anios": 25},
+            headers=self.bio_headers,
+        )
+        self.assertEqual(r1.status_code, 201)
+
+        # Bio 1 crea orden 2 (COMPLETO)
+        r2 = self.client.post(
+            "/api/ordenes",
+            json={"id_paciente": p1.id_paciente, "estudios": [{"codigo": "COAGULOGRAMA"}], "edad_anios": 25},
+            headers=self.bio_headers,
+        )
+        self.assertEqual(r2.status_code, 201)
+        ord2 = self.db.query(Orden).filter(Orden.id_orden == r2.json()["orden"]["id"]).first()
+        ord2.estado_trabajo = "COMPLETO"
+
+        # Bio 2 crea orden 3 (INCOMPLETO)
+        r3 = self.client.post(
+            "/api/ordenes",
+            json={"id_paciente": p2.id_paciente, "estudios": [{"codigo": "QUIMICA_SANGUINEA"}], "edad_anios": 40},
+            headers=self.bio2_headers,
+        )
+        self.assertEqual(r3.status_code, 201)
+        self.db.commit()
+
+        # BIOQUIMICO 1 ve solo lo suyo
+        res_bio1 = self.client.get("/api/ordenes/resumen", headers=self.bio_headers)
+        self.assertEqual(res_bio1.status_code, 200)
+        data_bio1 = res_bio1.json()
+        self.assertEqual(data_bio1["incompletas"], 1)
+        self.assertEqual(data_bio1["completas"], 1)
+        self.assertEqual(data_bio1["pendientes"], 2)
+
+        # Limpiar logs de seguridad para verificar que ADMIN no audita
+        self.db.query(LogSeguridad).delete()
+        self.db.commit()
+
+        # ADMIN ve totales de todos (sin auditoría)
+        res_admin = self.client.get("/api/ordenes/resumen", headers=self.admin_headers)
+        self.assertEqual(res_admin.status_code, 200)
+        data_admin = res_admin.json()
+        self.assertEqual(data_admin["incompletas"], 2)
+        self.assertEqual(data_admin["completas"], 1)
+        self.assertEqual(data_admin["pendientes"], 3)
+
+        logs_admin = self.db.query(LogSeguridad).filter(LogSeguridad.accion == "ADMIN_VE_PRIVADO").count()
+        self.assertEqual(logs_admin, 0, "GET /api/ordenes/resumen no debe auditar para ADMIN")

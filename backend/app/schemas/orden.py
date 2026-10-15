@@ -129,6 +129,20 @@ class OrdenCreadaResponse(BaseModel):
     advertencias: list[AdvertenciaSolapamiento] = []
 
 
+class AutorResumenSimple(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    nombres: str
+    apellido_paterno: str
+
+
+class EstudioDetalleItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    codigo: str
+    nombre: str
+
+
 class OrdenListItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -140,6 +154,10 @@ class OrdenListItem(BaseModel):
     estudios: list[str]
     fecha_solicitud: date
     creado_en: datetime
+    fecha_hora_toma_muestra: Optional[datetime] = None
+    edad_anios: Optional[int] = None
+    autor: AutorResumenSimple
+    estudios_detalle: list[EstudioDetalleItem]
 
 
 class OrdenListaResponse(BaseModel):
@@ -149,3 +167,11 @@ class OrdenListaResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class OrdenesResumenResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    incompletas: int
+    completas: int
+    pendientes: int

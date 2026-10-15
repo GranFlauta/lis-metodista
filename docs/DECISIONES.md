@@ -207,3 +207,13 @@ Congela todo lo necesario para reimprimir idéntico aunque el catálogo cambie:
 * **D35-03** La inactividad se mide con **actividad real del usuario** (ratón, teclado, toque, desplazamiento) que el navegador comunica en el latido (`actividad: true`). Un latido sin actividad NO renueva la inactividad.
 * **D35-04** Los tests solo corren contra bases cuyo nombre termina en `_test`.
 * **D35-05** Los cambios de esquema de esta fase se hacen con la migración Alembic `0002`. El contenedor del backend ejecuta `alembic upgrade head` al arrancar.
+
+## 14. Decisiones de Fase 3.6 (interfaz)
+
+* **D36-01** La interfaz sigue `docs/UX_GUIDE.md`. Lo que no existe aún no se muestra (sin "Próximamente").
+* **D36-02** La orden se crea al pulsar **Empezar a calcular** en la ventana de confirmación (no antes), para no dejar borradores vacíos.
+* **D36-03** "Fecha y hora de inicio" se guarda en `ordenes.fecha_hora_toma_muestra`, editable y precargada con la hora actual. (PENDIENTE de confirmar con el laboratorio si "inicio del estudio" y "toma de muestra" deben ser campos distintos.)
+* **D36-04** El menú pasa a barra lateral izquierda desplegable. "Pendientes" es una entrada propia con contador.
+* **D36-05** La vista previa de la captura es una representación en pantalla; el PDF oficial es de la Fase 5.
+* **D36-06** FUERA de esta fase: Estudio instantáneo, rol VISITANTE, notificaciones/temporizadores e impresión (ver `PROPUESTA_FUNCIONES_NUEVAS.md`).
+
