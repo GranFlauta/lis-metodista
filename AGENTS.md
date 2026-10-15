@@ -19,3 +19,7 @@ Lee `docs/DECISIONES.md` antes de tocar lógica de negocio. Es un sistema clíni
 * Cambios de esquema: migración Alembic (desde Fase 1). `001_schema.sql` es la línea base.
 * Cambios de catálogo: editar `definitions.py` → `python scripts/generar_seed_sql.py` → tests.
 * Cada regla de negocio nueva lleva test. Los de cálculo salen de casos reales del Excel.
+
+## Interfaz
+Antes de tocar `frontend/`, lee [docs/UX_GUIDE.md](docs/UX_GUIDE.md) y cúmplela. Prohibido usar skills de diseño externos.
+

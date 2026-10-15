@@ -18,12 +18,19 @@ export interface UsuarioAutenticado extends UsuarioResumen {
   debe_cambiar_password: boolean;
 }
 
+export interface ConfigSesionResumen {
+  intervalo_latido_seg: number;
+  inactividad_min: number;
+}
+
 export interface TokenResponse {
   access_token: string;
   token_type: string;
   expires_in: number;
   debe_cambiar_password: boolean;
+  rol?: string;
   usuario: UsuarioResumen;
+  config_sesion?: ConfigSesionResumen;
 }
 
 export interface LoginPayload {
@@ -34,6 +41,18 @@ export interface LoginPayload {
 export interface CambiarPasswordPayload {
   password_actual: string;
   password_nueva: string;
+}
+
+export interface HeartbeatResponse {
+  intervalo_latido_seg: number;
+  segundos_restantes_inactividad: number;
+}
+
+export interface SesionConfig {
+  sesion_intervalo_latido_seg: number;
+  sesion_muerta_tras_seg: number;
+  sesion_inactividad_min: number;
+  sesion_tope_absoluto_horas: number;
 }
 
 export async function loginApi(payload: LoginPayload): Promise<TokenResponse> {
@@ -55,10 +74,24 @@ export async function refreshApi(): Promise<TokenResponse> {
   return data;
 }
 
-export async function heartbeatApi(): Promise<void> {
-  await apiClient<void>("/api/auth/heartbeat", {
+export async function heartbeatApi(actividad: boolean = false): Promise<HeartbeatResponse> {
+  return apiClient<HeartbeatResponse>("/api/auth/heartbeat", {
     method: "POST",
+    body: JSON.stringify({ actividad }),
     retryOnSessionExpired: false,
+  });
+}
+
+export async function getSesionConfigApi(): Promise<SesionConfig> {
+  return apiClient<SesionConfig>("/api/admin/configuracion/sesion", {
+    method: "GET",
+  });
+}
+
+export async function updateSesionConfigApi(payload: SesionConfig): Promise<SesionConfig> {
+  return apiClient<SesionConfig>("/api/admin/configuracion/sesion", {
+    method: "PUT",
+    body: JSON.stringify(payload),
   });
 }
 

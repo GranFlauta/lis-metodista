@@ -12,6 +12,7 @@ import { LoginPage } from "./features/auth/LoginPage";
 import { CambiarPasswordPage } from "./features/auth/CambiarPasswordPage";
 import { HomePage } from "./features/home/HomePage";
 import { UsuariosPage } from "./features/admin/UsuariosPage";
+import { ConfiguracionSesionPage } from "./features/admin/ConfiguracionSesionPage";
 import { PacientesPage } from "./features/pacientes/PacientesPage";
 import { PacienteDetallePage } from "./features/pacientes/PacienteDetallePage";
 import { OrdenesPage } from "./features/ordenes/OrdenesPage";
@@ -67,6 +68,14 @@ export default function App() {
               element={
                 <RutaProtegida rolRequerido="ADMIN">
                   <UsuariosPage />
+                </RutaProtegida>
+              }
+            />
+            <Route
+              path="admin/configuracion"
+              element={
+                <RutaProtegida rolRequerido="ADMIN">
+                  <ConfiguracionSesionPage />
                 </RutaProtegida>
               }
             />

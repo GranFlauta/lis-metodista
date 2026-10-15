@@ -23,7 +23,6 @@ export const Layout: React.FC = () => {
       <header className="lis-navbar">
         <div className="lis-navbar-brand">
           <Link to="/" className="lis-logo-link">
-            <span className="lis-logo-icon">🔬</span>
             <span className="lis-logo-text">LIS Laboratorio Clínico</span>
           </Link>
         </div>
@@ -37,17 +36,25 @@ export const Layout: React.FC = () => {
             Inicio
           </NavLink>
 
-          {/* Menú de administración: SOLO VISIBLE PARA ADMIN (§9) */}
+          {/* Menú de administración: SOLO VISIBLE PARA ADMIN */}
           {esAdmin && (
-            <NavLink
-              to="/admin/usuarios"
-              className={({ isActive }) => `lis-nav-item ${isActive ? "active" : ""}`}
-            >
-              Administración de Usuarios
-            </NavLink>
+            <>
+              <NavLink
+                to="/admin/usuarios"
+                className={({ isActive }) => `lis-nav-item ${isActive ? "active" : ""}`}
+              >
+                Usuarios
+              </NavLink>
+              <NavLink
+                to="/admin/configuracion"
+                className={({ isActive }) => `lis-nav-item ${isActive ? "active" : ""}`}
+              >
+                Configuración
+              </NavLink>
+            </>
           )}
 
-          {/* Enlace activo a Pacientes (Fase 2 Bloque 4) */}
+          {/* Enlace activo a Pacientes */}
           <NavLink
             to="/pacientes"
             className={({ isActive }) => `lis-nav-item ${isActive ? "active" : ""}`}
@@ -55,18 +62,13 @@ export const Layout: React.FC = () => {
             Pacientes
           </NavLink>
 
-          {/* Enlace activo a Órdenes (Fase 2 Bloque 5) */}
+          {/* Enlace activo a Órdenes */}
           <NavLink
             to="/ordenes"
             className={({ isActive }) => `lis-nav-item ${isActive ? "active" : ""}`}
           >
             Órdenes
           </NavLink>
-
-          {/* Enlace futuro: deshabilitado con texto 'Próximamente' (§4.2, §9) */}
-          <span className="lis-nav-item lis-nav-disabled" title="Disponible en Fase 3">
-            Informes <span className="lis-badge-soon">Próximamente</span>
-          </span>
         </nav>
 
         <div className="lis-navbar-user">
