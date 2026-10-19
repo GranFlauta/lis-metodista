@@ -197,6 +197,6 @@ def obtener_configuracion_laboratorio(
     )
     cfg = {f.clave: f.valor for f in filas}
     return ConfiguracionLaboratorioResponse(
-        nombre_laboratorio=cfg.get("nombre_laboratorio", "LABORATORIO CLINICO URGENLAB"),
+        nombre_laboratorio=cfg.get("nombre_laboratorio", "LABORATORIO CLINICO METODISTA"),
         separador_decimal=cfg.get("separador_decimal", ","),
     )

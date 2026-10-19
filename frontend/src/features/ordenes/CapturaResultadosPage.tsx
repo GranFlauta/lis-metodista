@@ -50,7 +50,7 @@ export const CapturaResultadosPage: React.FC = () => {
   const [captura, setCaptura] = useState<CapturaOrdenResponse | null>(null);
   const [ordenDetalle, setOrdenDetalle] = useState<OrdenDetalle | null>(null);
   const [configLab, setConfigLab] = useState<ConfiguracionLaboratorio>({
-    nombre_laboratorio: "Laboratorio Clínico",
+    nombre_laboratorio: "Laboratorio Clínico Metodista",
     separador_decimal: ",",
   });
   const [cargando, setCargando] = useState<boolean>(true);
@@ -61,6 +61,9 @@ export const CapturaResultadosPage: React.FC = () => {
 
   // Valores modificados pendientes de persistir (código -> valor string o null)
   const valoresModificadosRef = useRef<Record<string, string | null>>({});
+
+  // Referencia para asegurar que el foco automático inicial se ejecute UNA sola vez al cargar la orden
+  const focoInicialRealizadoRef = useRef<boolean>(false);
 
   // Estado del autoguardado
   const [estadoGuardado, setEstadoGuardado] = useState<
@@ -80,6 +83,7 @@ export const CapturaResultadosPage: React.FC = () => {
   // Cargar datos iniciales
   useEffect(() => {
     let activo = true;
+    focoInicialRealizadoRef.current = false;
 
     async function cargarDatos() {
       setCargando(true);
@@ -87,7 +91,7 @@ export const CapturaResultadosPage: React.FC = () => {
       try {
         const [respConfig, respCaptura, respDetalle] = await Promise.all([
           getConfiguracionLaboratorioApi().catch(() => ({
-            nombre_laboratorio: "Laboratorio Clínico",
+            nombre_laboratorio: "Laboratorio Clínico Metodista",
             separador_decimal: ",",
           })),
           getCapturaOrdenApi(ordenId),
@@ -142,9 +146,10 @@ export const CapturaResultadosPage: React.FC = () => {
     };
   }, [ordenId]);
 
-  // Foco inicial en el primer campo editable al cargar
+  // Foco inicial en el primer campo editable ÚNICAMENTE al montar la orden por primera vez
   useEffect(() => {
-    if (!cargando && captura && !esAdmin) {
+    if (!cargando && captura && !esAdmin && !focoInicialRealizadoRef.current) {
+      focoInicialRealizadoRef.current = true;
       const timer = window.setTimeout(() => {
         const primerInput = document.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
           ".lis-captura-input:not([disabled])"
@@ -923,8 +928,8 @@ export const CapturaResultadosPage: React.FC = () => {
                   <span>{ordenDetalle?.medico_solicitante || "No especificado"}</span>
                 </div>
                 <div>
-                  <span style={{ fontSize: "11.5px", color: "var(--text-muted)", display: "block" }}>Origen:</span>
-                  <span>{ordenDetalle?.origen_solicitud || "General"}</span>
+                  <span style={{ fontSize: "11.5px", color: "var(--text-muted)", display: "block" }}>Pieza:</span>
+                  <span>{ordenDetalle?.pieza || "No asignada"}</span>
                 </div>
               </div>
 

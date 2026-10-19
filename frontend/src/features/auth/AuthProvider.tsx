@@ -44,7 +44,7 @@ interface AuthContextType {
 
 const CONFIG_SESION_DEFECTO: ConfigSesionResumen = {
   intervalo_latido_seg: 30,
-  inactividad_min: 30,
+  inactividad_min: 1440, // 24 horas
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -87,7 +87,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const resp = await heartbeatApi(huboActividad);
       if (resp) {
-        setSegundosRestantesInactividad(resp.segundos_restantes_inactividad);
+        setSegundosRestantesInactividad(Math.max(86400, resp.segundos_restantes_inactividad || 86400));
         if (resp.intervalo_latido_seg && resp.intervalo_latido_seg !== configSesion.intervalo_latido_seg) {
           setConfigSesion((prev) => ({
             ...prev,
@@ -116,17 +116,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await ejecutarLatido(true);
   }, [ejecutarLatido]);
 
-  // 1. Detección de actividad física del usuario (T5 punto 6)
+  // 1. Detección de actividad física del usuario (resetea el contador a 24 horas de inactividad)
   useEffect(() => {
+    const restablecerTiempoInactividad = () => {
+      setSegundosRestantesInactividad(86400); // 24 horas
+    };
+
     const registrarActividad = () => {
       actividadDetectadaRef.current = true;
+      restablecerTiempoInactividad();
     };
 
     const registrarMouseMove = () => {
       const ahoraMs = Date.now();
-      if (ahoraMs - ultimoMouseMoveRef.current >= 5000) {
+      if (ahoraMs - ultimoMouseMoveRef.current >= 2000) {
         actividadDetectadaRef.current = true;
         ultimoMouseMoveRef.current = ahoraMs;
+        restablecerTiempoInactividad();
       }
     };
 
@@ -185,7 +191,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSegundosRestantesInactividad((prev) => {
         if (prev === null) return null;
         if (prev <= 1) {
-          cerrarSesionLocal("Tu sesión expiró por inactividad prolongada.");
+          cerrarSesionLocal("Tu sesión expiró por inactividad prolongada (24 horas).");
           return 0;
         }
         return prev - 1;

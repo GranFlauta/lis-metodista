@@ -158,7 +158,7 @@ export const Layout: React.FC = () => {
         <div className="lis-sidebar-header">
           <Link to="/" className="lis-sidebar-brand" title="LIS Laboratorio Clínico">
             <span className="lis-sidebar-logo">LIS</span>
-            {sidebarExpandido && <span className="lis-sidebar-title">Laboratorio Clínico</span>}
+            {sidebarExpandido && <span className="lis-sidebar-title">Laboratorio Metodista</span>}
           </Link>
           <button
             type="button"
@@ -342,7 +342,7 @@ export const Layout: React.FC = () => {
             <h1 className="lis-topbar-title">{tituloPantalla}</h1>
           </div>
           <div className="lis-topbar-right">
-            <span className="lis-topbar-system-name">LIS Laboratorio Clínico</span>
+            <span className="lis-topbar-system-name">LIS Laboratorio Metodista</span>
           </div>
         </header>
 

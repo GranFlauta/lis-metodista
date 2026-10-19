@@ -143,6 +143,11 @@ export async function apiClient<T>(endpoint: string, options: RequestOptions = {
         // Falló el refresh
       }
 
+      // Si el refresh falló pero era una petición de latido (heartbeat), no botamos al usuario
+      if (endpoint.includes("/api/auth/heartbeat")) {
+        throw new ApiError(response.status, errorData.codigo, errorData.mensaje, errorData);
+      }
+
       // Si el refresh falló, limpiar sesión y disparar expiración
       setAccessToken(null);
       if (onSessionExpiredCallback) {

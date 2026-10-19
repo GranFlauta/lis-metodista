@@ -1140,23 +1140,58 @@ a:focus-visible {
   border-color: var(--primary);
 }
 
-/* --- Nueva Orden en 3 Zonas sin Scroll (§6.3) --- */
-.lis-nueva-orden-grid {
-  display: grid;
-  grid-template-columns: 310px 1fr 280px;
-  gap: 12px;
-  height: calc(100vh - 72px);
-  max-height: calc(100vh - 72px);
-  overflow: hidden;
+/* --- Nueva Orden: Cabecera superior (Paciente + Datos Orden) y Estudios abajo --- */
+.lis-nueva-orden-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
 }
 
-@media (max-width: 1200px) {
-  .lis-nueva-orden-grid {
+.lis-nueva-orden-cabecera {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 14px;
+}
+
+@media (max-width: 960px) {
+  .lis-nueva-orden-cabecera {
     grid-template-columns: 1fr;
-    height: auto;
-    max-height: none;
-    overflow-y: auto;
   }
+}
+
+.lis-cabecera-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 220px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.lis-nueva-orden-estudios {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.lis-estudios-footer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-light);
+  margin-top: 6px;
+  flex-wrap: wrap;
 }
 
 .lis-zone-card {

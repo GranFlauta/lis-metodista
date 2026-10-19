@@ -61,6 +61,7 @@ export const NuevaOrdenPage: React.FC = () => {
   // Zona 1: Paciente
   const [modoCrearNuevo, setModoCrearNuevo] = useState<boolean>(false);
   const [pacienteSeleccionado, setPacienteSeleccionado] = useState<PacienteDetalle | null>(null);
+  const [edadPacienteSeleccionadoManual, setEdadPacienteSeleccionadoManual] = useState<string>("");
 
   // Buscador de paciente
   const [busqueda, setBusqueda] = useState<string>("");
@@ -84,8 +85,7 @@ export const NuevaOrdenPage: React.FC = () => {
   const [estudiosSeleccionados, setEstudiosSeleccionados] = useState<Set<string>>(new Set());
   const [gruposInmunosero, setGruposInmunosero] = useState<Set<string>>(new Set());
 
-  // Zona 3: Datos de la Orden
-  const [origenSolicitud, setOrigenSolicitud] = useState<string>("");
+  // Datos de la Orden
   const [medicoSolicitante, setMedicoSolicitante] = useState<string>("");
   const [pieza, setPieza] = useState<string>("");
 
@@ -265,7 +265,10 @@ export const NuevaOrdenPage: React.FC = () => {
 
   // Validación para habilitar el botón "Continuar"
   const pacienteValido = Boolean(
-    pacienteSeleccionado ||
+    (pacienteSeleccionado && (
+      Boolean(pacienteSeleccionado.fecha_nacimiento) ||
+      (edadPacienteSeleccionadoManual.trim() !== "" && !isNaN(parseInt(edadPacienteSeleccionadoManual, 10)) && parseInt(edadPacienteSeleccionadoManual, 10) >= 0 && parseInt(edadPacienteSeleccionadoManual, 10) <= 130)
+    )) ||
     (modoCrearNuevo &&
       nuevoNombres.trim() &&
       nuevoPaterno.trim() &&
@@ -307,7 +310,7 @@ export const NuevaOrdenPage: React.FC = () => {
       return { codigo };
     });
 
-    // 2. Paciente payload si es nuevo
+    // 2. Paciente payload si es nuevo o edad manual
     let pacPayload: PacienteCreatePayload | null = null;
     let edadAniosFinal: number | null = null;
 
@@ -323,8 +326,12 @@ export const NuevaOrdenPage: React.FC = () => {
         fecha_nacimiento: nuevoFechaNac || null,
         telefono: null,
       };
-      if (!nuevoFechaNac && nuevoEdadAnios) {
+      if (!nuevoFechaNac && nuevoEdadAnios.trim()) {
         edadAniosFinal = parseInt(nuevoEdadAnios, 10);
+      }
+    } else if (pacienteSeleccionado) {
+      if (!pacienteSeleccionado.fecha_nacimiento && edadPacienteSeleccionadoManual.trim()) {
+        edadAniosFinal = parseInt(edadPacienteSeleccionadoManual, 10);
       }
     }
 
@@ -333,7 +340,7 @@ export const NuevaOrdenPage: React.FC = () => {
       paciente: pacPayload,
       perfil: perfilActivo || null,
       estudios: estudiosPayload,
-      origen_solicitud: origenSolicitud.trim() || null,
+      origen_solicitud: null,
       medico_solicitante: medicoSolicitante.trim() || null,
       pieza: pieza.trim() || null,
       fecha_hora_toma_muestra: fechaHoraInicio ? new Date(fechaHoraInicio).toISOString() : null,
@@ -393,287 +400,437 @@ export const NuevaOrdenPage: React.FC = () => {
     : "—";
 
   const edadAniosCalculada = pacienteSeleccionado
-    ? calcularEdadAnios(pacienteSeleccionado.fecha_nacimiento)
+    ? pacienteSeleccionado.fecha_nacimiento
+      ? calcularEdadAnios(pacienteSeleccionado.fecha_nacimiento)
+      : edadPacienteSeleccionadoManual.trim()
+      ? parseInt(edadPacienteSeleccionadoManual, 10)
+      : null
     : nuevoFechaNac
     ? calcularEdadAnios(nuevoFechaNac)
-    : nuevoEdadAnios
+    : nuevoEdadAnios.trim()
     ? parseInt(nuevoEdadAnios, 10)
     : null;
 
   return (
-    <div className="lis-page-container" style={{ padding: 0 }}>
-      {/* Tres zonas en fila sin scroll de página en 1366x768 (§6.3) */}
-      <form onSubmit={handleContinuar} className="lis-nueva-orden-grid">
-        {/* ZONA 1: PACIENTE */}
-        <section className="lis-zone-card" aria-label="Zona 1: Paciente">
+    <div className="lis-page-container" style={{ padding: "0 0 24px 0" }}>
+      <form onSubmit={handleContinuar} className="lis-nueva-orden-layout">
+        {/* CABECERA SUPERIOR: SECCIÓN 1 (PACIENTE) Y SECCIÓN 2 (DATOS DE LA ORDEN) */}
+        <div className="lis-nueva-orden-cabecera">
+          {/* SECCIÓN 1: PACIENTE */}
+          <section className="lis-cabecera-card lis-cabecera-paciente" aria-label="Sección 1: Paciente">
+            <div className="lis-zone-header">
+              <h2 className="lis-zone-title">
+                <span className="lis-zone-badge">1</span>
+                Paciente
+              </h2>
+              {pacienteSeleccionado && (
+                <button
+                  type="button"
+                  className="lis-btn lis-btn-text lis-btn-sm"
+                  onClick={() => {
+                    setPacienteSeleccionado(null);
+                    setEdadPacienteSeleccionadoManual("");
+                  }}
+                >
+                  Cambiar
+                </button>
+              )}
+            </div>
+
+            <div className="lis-zone-content">
+              {/* 1A: Paciente Seleccionado */}
+              {pacienteSeleccionado ? (
+                <div>
+                  <div className="lis-paciente-compact-box">
+                    <div className="lis-paciente-compact-header">
+                      <span className="lis-paciente-compact-nombre">
+                        {pacienteSeleccionado.apellido_paterno} {pacienteSeleccionado.apellido_materno || ""}, {pacienteSeleccionado.nombres}
+                      </span>
+                    </div>
+                    <div className="lis-paciente-compact-meta">
+                      <span>{pacienteSeleccionado.sin_ci ? "Sin CI" : `CI: ${pacienteSeleccionado.ci}${pacienteSeleccionado.ci_complemento ? `-${pacienteSeleccionado.ci_complemento}` : ""}`}</span>
+                      <span>{pacienteSeleccionado.sexo === "M" ? "Masculino" : "Femenino"}</span>
+                      {pacienteSeleccionado.fecha_nacimiento && edadAniosCalculada !== null && (
+                        <span>{edadAniosCalculada} años</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Entrada directa y dinámica para edad en años si no tiene fecha de nacimiento */}
+                  {!pacienteSeleccionado.fecha_nacimiento && (
+                    <div
+                      style={{
+                        marginTop: "8px",
+                        padding: "8px 12px",
+                        backgroundColor: "#fff7ed",
+                        border: "1.5px solid #fb923c",
+                        borderRadius: "var(--radius)",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "6px",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+                        <label
+                          htmlFor="edad-paciente-manual-input"
+                          style={{ fontSize: "12.5px", fontWeight: 700, color: "#9a3412" }}
+                        >
+                          Edad del paciente (años) *:
+                        </label>
+                        <input
+                          id="edad-paciente-manual-input"
+                          type="number"
+                          min={0}
+                          max={130}
+                          value={edadPacienteSeleccionadoManual}
+                          onChange={(e) => setEdadPacienteSeleccionadoManual(e.target.value)}
+                          placeholder="Ej. 35"
+                          required
+                          autoFocus
+                          style={{
+                            width: "85px",
+                            padding: "4px 8px",
+                            fontSize: "14px",
+                            fontWeight: 700,
+                            textAlign: "center",
+                            border: "1.5px solid #ea580c",
+                            borderRadius: "var(--radius)",
+                            backgroundColor: "#ffffff",
+                          }}
+                        />
+                      </div>
+                      <span style={{ fontSize: "11px", color: "#c2410c", fontWeight: 500 }}>
+                        Paciente sin fecha de nacimiento registrada. Indique su edad en años para habilitar y calcular la orden.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ) : !modoCrearNuevo ? (
+                /* 1B: Buscador único de paciente */
+                <div className="lis-paciente-search-wrap">
+                  <label htmlFor="buscador-paciente-input" style={{ fontSize: "12.5px", fontWeight: 600 }}>
+                    Buscar paciente existente
+                  </label>
+                  <input
+                    id="buscador-paciente-input"
+                    type="search"
+                    value={busqueda}
+                    onChange={(e) => setBusqueda(e.target.value)}
+                    placeholder="CI o apellidos del paciente..."
+                    autoComplete="off"
+                    autoFocus
+                    style={{ width: "100%" }}
+                  />
+
+                  {buscando && (
+                    <span className="lis-text-muted" style={{ fontSize: "12px", marginTop: "4px" }}>
+                      Buscando…
+                    </span>
+                  )}
+
+                  {/* Dropdown de resultados */}
+                  {resultadosBusqueda.length > 0 && (
+                    <div className="lis-dropdown-results" role="listbox">
+                      {resultadosBusqueda.map((p) => (
+                        <div
+                          key={p.id}
+                          className="lis-dropdown-item"
+                          onClick={() => {
+                            setPacienteSeleccionado(p);
+                            setResultadosBusqueda([]);
+                            setBusqueda("");
+                          }}
+                          role="option"
+                          aria-selected="false"
+                        >
+                          <div>
+                            <strong>
+                              {p.apellido_paterno} {p.apellido_materno || ""}, {p.nombres}
+                            </strong>
+                            <div className="lis-text-muted" style={{ fontSize: "11.5px" }}>
+                              {p.sin_ci ? "Sin CI" : `CI: ${p.ci}`} • {p.sexo}
+                            </div>
+                          </div>
+                          <span className="lis-btn lis-btn-secondary lis-btn-sm">Elegir</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: "8px", borderTop: "1px dashed var(--border-light)", paddingTop: "6px" }}>
+                    <button
+                      type="button"
+                      className="lis-btn lis-btn-text"
+                      style={{ padding: 0, fontSize: "13px", fontWeight: 600 }}
+                      onClick={() => {
+                        setModoCrearNuevo(true);
+                        setBusqueda("");
+                        setResultadosBusqueda([]);
+                      }}
+                    >
+                      + Crear paciente nuevo
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* 1C: Formulario compacto de paciente nuevo integrado */
+                <div className="lis-nuevo-paciente-form">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <strong>Nuevo paciente</strong>
+                    <button
+                      type="button"
+                      className="lis-btn lis-btn-text lis-btn-sm"
+                      onClick={() => setModoCrearNuevo(false)}
+                    >
+                      Volver a buscar
+                    </button>
+                  </div>
+
+                  {conflictoPacienteId && (
+                    <div className="lis-alert lis-alert-warning" style={{ padding: "6px 8px", fontSize: "12px" }}>
+                      <span>CI ya registrado.</span>
+                      <button
+                        type="button"
+                        className="lis-btn lis-btn-primary lis-btn-sm"
+                        onClick={async () => {
+                          const pac = await obtenerPacienteApi(conflictoPacienteId);
+                          setPacienteSeleccionado(pac);
+                          setModoCrearNuevo(false);
+                          setConflictoPacienteId(null);
+                        }}
+                      >
+                        Usar paciente existente
+                      </button>
+                    </div>
+                  )}
+
+                  <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer", fontSize: "12.5px" }}>
+                    <input
+                      type="checkbox"
+                      checked={nuevoSinCi}
+                      onChange={(e) => {
+                        setNuevoSinCi(e.target.checked);
+                        if (e.target.checked) {
+                          setNuevoCi("");
+                          setNuevoCiComp("");
+                        }
+                      }}
+                    />
+                    Sin Carnet de Identidad (Sin CI)
+                  </label>
+
+                  {!nuevoSinCi && (
+                    <div className="lis-form-row">
+                      <div>
+                        <label style={{ fontSize: "11px" }}>CI *</label>
+                        <input
+                          type="text"
+                          value={nuevoCi}
+                          onChange={(e) => setNuevoCi(e.target.value.toUpperCase())}
+                          placeholder="Número de CI"
+                          required={!nuevoSinCi}
+                          style={{ width: "100%", padding: "4px 8px" }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: "11px" }}>Comp.</label>
+                        <input
+                          type="text"
+                          value={nuevoCiComp}
+                          onChange={(e) => setNuevoCiComp(e.target.value.toUpperCase())}
+                          placeholder="Ej. 1A"
+                          maxLength={5}
+                          style={{ width: "100%", padding: "4px 8px" }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="lis-form-row">
+                    <div>
+                      <label style={{ fontSize: "11px" }}>Paterno *</label>
+                      <input
+                        type="text"
+                        value={nuevoPaterno}
+                        onChange={(e) => setNuevoPaterno(e.target.value)}
+                        placeholder="Ap. Paterno"
+                        required
+                        style={{ width: "100%", padding: "4px 8px" }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: "11px" }}>Materno</label>
+                      <input
+                        type="text"
+                        value={nuevoMaterno}
+                        onChange={(e) => setNuevoMaterno(e.target.value)}
+                        placeholder="Ap. Materno"
+                        style={{ width: "100%", padding: "4px 8px" }}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: "11px" }}>Nombres *</label>
+                    <input
+                      type="text"
+                      value={nuevoNombres}
+                      onChange={(e) => setNuevoNombres(e.target.value)}
+                      placeholder="Nombres completos"
+                      required
+                      style={{ width: "100%", padding: "4px 8px" }}
+                    />
+                  </div>
+
+                  <div className="lis-form-row">
+                    <div>
+                      <label style={{ fontSize: "11px" }}>Sexo *</label>
+                      <select
+                        value={nuevoSexo}
+                        onChange={(e) => setNuevoSexo(e.target.value as "M" | "F")}
+                        style={{ width: "100%", padding: "4px 8px" }}
+                      >
+                        <option value="M">M</option>
+                        <option value="F">F</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: "11px" }}>Fecha Nac. o Edad</label>
+                      <input
+                        type="date"
+                        value={nuevoFechaNac}
+                        onChange={(e) => setNuevoFechaNac(e.target.value)}
+                        max={new Date().toISOString().split("T")[0]}
+                        style={{ width: "100%", padding: "4px 8px" }}
+                      />
+                    </div>
+                  </div>
+
+                  {!nuevoFechaNac && (
+                    <div>
+                      <label style={{ fontSize: "11px" }}>Edad en Años *</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={130}
+                        value={nuevoEdadAnios}
+                        onChange={(e) => setNuevoEdadAnios(e.target.value)}
+                        placeholder="0 - 130"
+                        style={{ width: "100%", padding: "4px 8px" }}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* SECCIÓN 2: DATOS DE LA ORDEN */}
+          <section className="lis-cabecera-card lis-cabecera-orden" aria-label="Sección 2: Datos de la orden">
+            <div className="lis-zone-header">
+              <h2 className="lis-zone-title">
+                <span className="lis-zone-badge">2</span>
+                Datos de la Orden
+              </h2>
+              <span className={`lis-chip ${estudiosSeleccionados.size > 0 ? "lis-chip-primary" : ""}`}>
+                {estudiosSeleccionados.size} estudios seleccionados
+              </span>
+            </div>
+
+            <div className="lis-zone-content">
+              <div className="lis-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                <div className="lis-form-group">
+                  <label htmlFor="input-medico" style={{ fontSize: "12px", fontWeight: 600 }}>
+                    Médico solicitante
+                  </label>
+                  <input
+                    id="input-medico"
+                    type="text"
+                    value={medicoSolicitante}
+                    onChange={(e) => setMedicoSolicitante(e.target.value)}
+                    placeholder="Ej. Dr. Mario Torres"
+                    maxLength={150}
+                    style={{ padding: "6px 10px", fontSize: "13px" }}
+                  />
+                </div>
+
+                <div className="lis-form-group">
+                  <label htmlFor="input-pieza" style={{ fontSize: "12px", fontWeight: 600 }}>
+                    Pieza
+                  </label>
+                  <input
+                    id="input-pieza"
+                    type="text"
+                    value={pieza}
+                    onChange={(e) => setPieza(e.target.value)}
+                    placeholder="Ej. Sala 2, Cama 4"
+                    maxLength={100}
+                    style={{ padding: "6px 10px", fontSize: "13px" }}
+                  />
+                </div>
+              </div>
+
+              {/* Resumen clínico superior */}
+              <div className="lis-resumen-box" style={{ marginTop: "4px", padding: "8px 12px" }}>
+                <div className="lis-resumen-row">
+                  <span className="lis-resumen-label">Paciente:</span>
+                  <span className="lis-resumen-val">{nombreCompleto}</span>
+                </div>
+                <div className="lis-resumen-row">
+                  <span className="lis-resumen-label">Documento:</span>
+                  <span className="lis-resumen-val">{ciMostrado}</span>
+                </div>
+              </div>
+
+              {/* Botón principal Continuar en la cabecera */}
+              <div style={{ marginTop: "auto", paddingTop: "6px" }}>
+                <button
+                  type="submit"
+                  className="lis-btn lis-btn-primary lis-btn-block"
+                  style={{ height: "42px", fontSize: "15px", fontWeight: 700 }}
+                  disabled={!puedeContinuar}
+                >
+                  Continuar a confirmación →
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        {/* SECCIÓN 3: SELECCIÓN COMPLETA DE ESTUDIOS (ABAJO) */}
+        <section className="lis-zone-card lis-nueva-orden-estudios" aria-label="Sección 3: Estudios">
           <div className="lis-zone-header">
-            <h2 className="lis-zone-title">
-              <span className="lis-zone-badge">1</span>
-              Paciente
-            </h2>
-            {pacienteSeleccionado && (
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <h2 className="lis-zone-title">
+                <span className="lis-zone-badge">3</span>
+                Selección de Estudios del Laboratorio
+              </h2>
+              <span className="lis-chip lis-chip-primary">
+                {estudiosSeleccionados.size} seleccionados
+              </span>
+            </div>
+
+            {estudiosSeleccionados.size > 0 && (
               <button
                 type="button"
+                onClick={() => {
+                  setEstudiosSeleccionados(new Set());
+                  setGruposInmunosero(new Set());
+                  setPerfilActivo("");
+                }}
                 className="lis-btn lis-btn-text lis-btn-sm"
-                onClick={() => setPacienteSeleccionado(null)}
+                style={{ fontSize: "12px", color: "var(--danger)" }}
               >
-                Cambiar
+                Limpiar selección
               </button>
             )}
           </div>
 
           <div className="lis-zone-content">
-            {/* 1A: Paciente Seleccionado */}
-            {pacienteSeleccionado ? (
-              <div className="lis-paciente-compact-box">
-                <div className="lis-paciente-compact-header">
-                  <span className="lis-paciente-compact-nombre">
-                    {pacienteSeleccionado.apellido_paterno} {pacienteSeleccionado.apellido_materno || ""}, {pacienteSeleccionado.nombres}
-                  </span>
-                </div>
-                <div className="lis-paciente-compact-meta">
-                  <span>{pacienteSeleccionado.sin_ci ? "Sin CI" : `CI: ${pacienteSeleccionado.ci}`}</span>
-                  <span>{pacienteSeleccionado.sexo === "M" ? "Masculino" : "Femenino"}</span>
-                  {edadAniosCalculada !== null && <span>{edadAniosCalculada} años</span>}
-                </div>
-              </div>
-            ) : !modoCrearNuevo ? (
-              /* 1B: Buscador único de paciente */
-              <div className="lis-paciente-search-wrap">
-                <label htmlFor="buscador-paciente-input" style={{ fontSize: "12.5px", fontWeight: 600 }}>
-                  Buscar paciente
-                </label>
-                <input
-                  id="buscador-paciente-input"
-                  type="search"
-                  value={busqueda}
-                  onChange={(e) => setBusqueda(e.target.value)}
-                  placeholder="CI o apellidos del paciente..."
-                  autoComplete="off"
-                  autoFocus
-                  style={{ width: "100%" }}
-                />
-
-                {buscando && (
-                  <span className="lis-text-muted" style={{ fontSize: "12px", marginTop: "4px" }}>
-                    Buscando…
-                  </span>
-                )}
-
-                {/* Dropdown de resultados */}
-                {resultadosBusqueda.length > 0 && (
-                  <div className="lis-dropdown-results" role="listbox">
-                    {resultadosBusqueda.map((p) => (
-                      <div
-                        key={p.id}
-                        className="lis-dropdown-item"
-                        onClick={() => {
-                          setPacienteSeleccionado(p);
-                          setResultadosBusqueda([]);
-                          setBusqueda("");
-                        }}
-                        role="option"
-                        aria-selected="false"
-                      >
-                        <div>
-                          <strong>
-                            {p.apellido_paterno} {p.apellido_materno || ""}, {p.nombres}
-                          </strong>
-                          <div className="lis-text-muted" style={{ fontSize: "11.5px" }}>
-                            {p.sin_ci ? "Sin CI" : `CI: ${p.ci}`} • {p.sexo}
-                          </div>
-                        </div>
-                        <span className="lis-btn lis-btn-secondary lis-btn-sm">Elegir</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div style={{ marginTop: "12px", borderTop: "1px dashed var(--border-light)", paddingTop: "8px" }}>
-                  <button
-                    type="button"
-                    className="lis-btn lis-btn-text"
-                    style={{ padding: 0, fontSize: "13px", fontWeight: 600 }}
-                    onClick={() => {
-                      setModoCrearNuevo(true);
-                      setBusqueda("");
-                      setResultadosBusqueda([]);
-                    }}
-                  >
-                    + Crear paciente nuevo
-                  </button>
-                </div>
-              </div>
-            ) : (
-              /* 1C: Formulario compacto de paciente nuevo integrado en la misma zona */
-              <div className="lis-nuevo-paciente-form">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <strong>Nuevo paciente</strong>
-                  <button
-                    type="button"
-                    className="lis-btn lis-btn-text lis-btn-sm"
-                    onClick={() => setModoCrearNuevo(false)}
-                  >
-                    Volver a buscar
-                  </button>
-                </div>
-
-                {conflictoPacienteId && (
-                  <div className="lis-alert lis-alert-warning" style={{ padding: "6px 8px", fontSize: "12px" }}>
-                    <span>CI ya registrado.</span>
-                    <button
-                      type="button"
-                      className="lis-btn lis-btn-primary lis-btn-sm"
-                      onClick={async () => {
-                        const pac = await obtenerPacienteApi(conflictoPacienteId);
-                        setPacienteSeleccionado(pac);
-                        setModoCrearNuevo(false);
-                        setConflictoPacienteId(null);
-                      }}
-                    >
-                      Usar paciente existente
-                    </button>
-                  </div>
-                )}
-
-                <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer", fontSize: "12.5px" }}>
-                  <input
-                    type="checkbox"
-                    checked={nuevoSinCi}
-                    onChange={(e) => {
-                      setNuevoSinCi(e.target.checked);
-                      if (e.target.checked) {
-                        setNuevoCi("");
-                        setNuevoCiComp("");
-                      }
-                    }}
-                  />
-                  Sin Carnet de Identidad (Sin CI)
-                </label>
-
-                {!nuevoSinCi && (
-                  <div className="lis-form-row">
-                    <div>
-                      <label style={{ fontSize: "11px" }}>CI *</label>
-                      <input
-                        type="text"
-                        value={nuevoCi}
-                        onChange={(e) => setNuevoCi(e.target.value.toUpperCase())}
-                        placeholder="Número de CI"
-                        required={!nuevoSinCi}
-                        style={{ width: "100%", padding: "4px 8px" }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: "11px" }}>Comp.</label>
-                      <input
-                        type="text"
-                        value={nuevoCiComp}
-                        onChange={(e) => setNuevoCiComp(e.target.value.toUpperCase())}
-                        placeholder="Ej. 1A"
-                        maxLength={5}
-                        style={{ width: "100%", padding: "4px 8px" }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                <div className="lis-form-row">
-                  <div>
-                    <label style={{ fontSize: "11px" }}>Paterno *</label>
-                    <input
-                      type="text"
-                      value={nuevoPaterno}
-                      onChange={(e) => setNuevoPaterno(e.target.value)}
-                      placeholder="Ap. Paterno"
-                      required
-                      style={{ width: "100%", padding: "4px 8px" }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: "11px" }}>Materno</label>
-                    <input
-                      type="text"
-                      value={nuevoMaterno}
-                      onChange={(e) => setNuevoMaterno(e.target.value)}
-                      placeholder="Ap. Materno"
-                      style={{ width: "100%", padding: "4px 8px" }}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label style={{ fontSize: "11px" }}>Nombres *</label>
-                  <input
-                    type="text"
-                    value={nuevoNombres}
-                    onChange={(e) => setNuevoNombres(e.target.value)}
-                    placeholder="Nombres completos"
-                    required
-                    style={{ width: "100%", padding: "4px 8px" }}
-                  />
-                </div>
-
-                <div className="lis-form-row">
-                  <div>
-                    <label style={{ fontSize: "11px" }}>Sexo *</label>
-                    <select
-                      value={nuevoSexo}
-                      onChange={(e) => setNuevoSexo(e.target.value as "M" | "F")}
-                      style={{ width: "100%", padding: "4px 8px" }}
-                    >
-                      <option value="M">M</option>
-                      <option value="F">F</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: "11px" }}>Fecha Nac. o Edad</label>
-                    <input
-                      type="date"
-                      value={nuevoFechaNac}
-                      onChange={(e) => setNuevoFechaNac(e.target.value)}
-                      max={new Date().toISOString().split("T")[0]}
-                      style={{ width: "100%", padding: "4px 8px" }}
-                    />
-                  </div>
-                </div>
-
-                {!nuevoFechaNac && (
-                  <div>
-                    <label style={{ fontSize: "11px" }}>Edad en Años *</label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={130}
-                      value={nuevoEdadAnios}
-                      onChange={(e) => setNuevoEdadAnios(e.target.value)}
-                      placeholder="0 - 130"
-                      style={{ width: "100%", padding: "4px 8px" }}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* ZONA 2: ESTUDIOS */}
-        <section className="lis-zone-card" aria-label="Zona 2: Estudios">
-          <div className="lis-zone-header">
-            <h2 className="lis-zone-title">
-              <span className="lis-zone-badge">2</span>
-              Estudios
-            </h2>
-            <span className="lis-chip lis-chip-primary">
-              {estudiosSeleccionados.size} seleccionados
-            </span>
-          </div>
-
-          <div className="lis-zone-content">
             {/* Botones de perfil rápido */}
             <div className="lis-perfiles-bar">
-              <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-muted)", marginRight: "4px" }}>
-                Perfiles:
+              <span style={{ fontSize: "12.5px", fontWeight: 700, color: "var(--text-muted)", marginRight: "6px" }}>
+                Perfiles rápidos:
               </span>
               {perfilesCatalogo.map((perf) => (
                 <button
@@ -685,23 +842,9 @@ export const NuevaOrdenPage: React.FC = () => {
                   {perf.nombre}
                 </button>
               ))}
-              {estudiosSeleccionados.size > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEstudiosSeleccionados(new Set());
-                    setGruposInmunosero(new Set());
-                    setPerfilActivo("");
-                  }}
-                  className="lis-btn lis-btn-text lis-btn-sm"
-                  style={{ fontSize: "11.5px" }}
-                >
-                  Limpiar
-                </button>
-              )}
             </div>
 
-            {/* Cuadrícula de 9 interruptores compactos */}
+            {/* Cuadrícula de 9 interruptores amplios */}
             {cargandoCatalogo ? (
               <p className="lis-text-muted" style={{ fontSize: "13px" }}>
                 Cargando catálogo…
@@ -741,7 +884,7 @@ export const NuevaOrdenPage: React.FC = () => {
                       {/* Inmunoserología desplegada en línea */}
                       {est.codigo === "INMUNOSEROLOGIA" && seleccionado && est.grupos && (
                         <div className="lis-inmunosero-dropdown">
-                          <span style={{ fontSize: "12px", fontWeight: 700, color: "#701a75" }}>
+                          <span style={{ fontSize: "12.5px", fontWeight: 700, color: "#701a75" }}>
                             Grupos de Inmunoserología:
                           </span>
                           <div className="lis-inmunosero-grid">
@@ -763,7 +906,7 @@ export const NuevaOrdenPage: React.FC = () => {
                                     />
                                     <strong>{etiquetaHumanizada}</strong>
                                   </div>
-                                  <span style={{ fontSize: "10.5px", color: "var(--text-muted)", paddingLeft: "20px" }}>
+                                  <span style={{ fontSize: "11px", color: "var(--text-muted)", paddingLeft: "20px" }}>
                                     {paramsTexto}
                                   </span>
                                 </label>
@@ -777,89 +920,21 @@ export const NuevaOrdenPage: React.FC = () => {
                 })}
               </div>
             )}
-          </div>
-        </section>
 
-        {/* ZONA 3: DATOS DE LA ORDEN Y CONTINUAR */}
-        <section className="lis-zone-card" aria-label="Zona 3: Datos de la orden">
-          <div className="lis-zone-header">
-            <h2 className="lis-zone-title">
-              <span className="lis-zone-badge">3</span>
-              Datos de la orden
-            </h2>
-          </div>
-
-          <div className="lis-zone-content">
-            <div className="lis-form-group">
-              <label htmlFor="input-origen" style={{ fontSize: "12px" }}>
-                Origen de solicitud
-              </label>
-              <input
-                id="input-origen"
-                type="text"
-                value={origenSolicitud}
-                onChange={(e) => setOrigenSolicitud(e.target.value)}
-                placeholder="Ej. Emergencias, Consulta..."
-                maxLength={100}
-                style={{ padding: "5px 8px", fontSize: "13px" }}
-              />
-            </div>
-
-            <div className="lis-form-group">
-              <label htmlFor="input-medico" style={{ fontSize: "12px" }}>
-                Médico solicitante
-              </label>
-              <input
-                id="input-medico"
-                type="text"
-                value={medicoSolicitante}
-                onChange={(e) => setMedicoSolicitante(e.target.value)}
-                placeholder="Ej. Dr. Mario Torres"
-                maxLength={150}
-                style={{ padding: "5px 8px", fontSize: "13px" }}
-              />
-            </div>
-
-            <div className="lis-form-group">
-              <label htmlFor="input-pieza" style={{ fontSize: "12px" }}>
-                Pieza / Cama
-              </label>
-              <input
-                id="input-pieza"
-                type="text"
-                value={pieza}
-                onChange={(e) => setPieza(e.target.value)}
-                placeholder="Ej. Sala 2, Cama 4"
-                maxLength={100}
-                style={{ padding: "5px 8px", fontSize: "13px" }}
-              />
-            </div>
-
-            {/* Resumen */}
-            <div className="lis-resumen-box">
-              <div className="lis-resumen-row">
-                <span className="lis-resumen-label">Paciente:</span>
-                <span className="lis-resumen-val">{nombreCompleto}</span>
-              </div>
-              <div className="lis-resumen-row">
-                <span className="lis-resumen-label">Documento:</span>
-                <span className="lis-resumen-val">{ciMostrado}</span>
-              </div>
-              <div className="lis-resumen-row">
-                <span className="lis-resumen-label">Estudios:</span>
-                <span className="lis-resumen-val">{estudiosSeleccionados.size} seleccionados</span>
-              </div>
-            </div>
-
-            {/* Botón Continuar */}
-            <div style={{ marginTop: "auto", paddingTop: "8px" }}>
+            {/* Barra de acción inferior */}
+            <div className="lis-estudios-footer-bar">
+              <span className="lis-text-muted" style={{ fontSize: "13px" }}>
+                {estudiosSeleccionados.size === 0
+                  ? "Seleccione al menos un estudio clínico o perfil para habilitar la orden."
+                  : `${estudiosSeleccionados.size} estudios seleccionados.`}
+              </span>
               <button
                 type="submit"
-                className="lis-btn lis-btn-primary lis-btn-block"
-                style={{ height: "42px", fontSize: "15px", fontWeight: 700 }}
+                className="lis-btn lis-btn-primary"
+                style={{ height: "42px", padding: "0 28px", fontSize: "15px", fontWeight: 700 }}
                 disabled={!puedeContinuar}
               >
-                Continuar →
+                Continuar a confirmación →
               </button>
             </div>
           </div>
@@ -918,9 +993,35 @@ export const NuevaOrdenPage: React.FC = () => {
                 <span className="lis-confirm-value">{nombreCompleto}</span>
 
                 <span className="lis-confirm-label">Edad:</span>
-                <span className="lis-confirm-value">
-                  {edadAniosCalculada !== null ? `${edadAniosCalculada} años` : "No registrada"}
-                </span>
+                {(!pacienteSeleccionado?.fecha_nacimiento && !nuevoFechaNac) ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <input
+                      type="number"
+                      min={0}
+                      max={130}
+                      value={edadPacienteSeleccionadoManual || nuevoEdadAnios}
+                      onChange={(e) => {
+                        setEdadPacienteSeleccionadoManual(e.target.value);
+                        setNuevoEdadAnios(e.target.value);
+                      }}
+                      placeholder="Ej. 35"
+                      style={{
+                        width: "80px",
+                        padding: "3px 6px",
+                        fontSize: "13px",
+                        fontWeight: 700,
+                        textAlign: "center",
+                        border: "1.5px solid var(--primary)",
+                        borderRadius: "var(--radius)",
+                      }}
+                    />
+                    <span style={{ fontSize: "12px", fontWeight: 600 }}>años</span>
+                  </div>
+                ) : (
+                  <span className="lis-confirm-value">
+                    {edadAniosCalculada !== null ? `${edadAniosCalculada} años` : "No registrada"}
+                  </span>
+                )}
 
                 <span className="lis-confirm-label">Estudios:</span>
                 <div className="lis-chips-container">

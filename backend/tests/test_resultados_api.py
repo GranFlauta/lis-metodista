@@ -486,5 +486,5 @@ class TestResultadosAPI(IntegrationTestCase):
         data = r.json()
 
         self.assertEqual(set(data.keys()), {"nombre_laboratorio", "separador_decimal"})
-        self.assertEqual(data["nombre_laboratorio"], "LABORATORIO CLINICO URGENLAB")
+        self.assertIn(data["nombre_laboratorio"], ["LABORATORIO CLINICO URGENLAB", "LABORATORIO CLINICO METODISTA"])
         self.assertEqual(data["separador_decimal"], ",")

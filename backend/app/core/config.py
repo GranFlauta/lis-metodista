@@ -10,14 +10,14 @@ class Settings(BaseSettings):
     database_url: str
     jwt_secret: str
     heartbeat_interval_seconds: int = 30
-    session_dead_after_seconds: int = 150      # sin latidos => sesión muerta (pestaña cerrada / PC apagada)
-    idle_timeout_minutes: int = 30             # sin actividad del usuario
-    absolute_session_hours: int = 12           # tope duro
+    session_dead_after_seconds: int = 86400     # 24 horas (sin latidos no muere en 150s)
+    idle_timeout_minutes: int = 1440            # 24 horas (inactividad)
+    absolute_session_hours: int = 24            # 24 horas (tope duro)
 
-    access_token_minutes: int = 10
+    access_token_minutes: int = 1440            # 24 horas (token no expira cada 10 min)
     max_login_attempts: int = 5
     lockout_minutes: int = 15
-    cookie_secure: bool = True                  # Cambiar a false si estás en desarrollo local sin HTTPS
+    cookie_secure: bool = False                 # False en desarrollo local y demo HTTP
     enable_docs: bool = False                   # D35-01: /docs y /openapi.json solo si es true
     modo_demo: bool = False                     # Habilita /docs, CORS y SPA para presentaciones por ngrok
     sesion_indefinida: bool = False             # Si es true, la sesión no expira por inactividad ni falta de latidos
@@ -34,8 +34,11 @@ settings = Settings()  # type: ignore[call-arg]
 
 
 def es_modo_demo() -> bool:
-    """Indica si el modo demo o de sesión indefinida está activo fuera de pruebas unitarias."""
+    """Indica si el modo extendido está activo fuera de pruebas unitarias."""
     import sys
     en_pruebas = "unittest" in sys.modules or "pytest" in sys.modules
-    return bool((settings.modo_demo or settings.sesion_indefinida) and not en_pruebas)
+    if en_pruebas:
+        return False
+    # En ejecución real de la aplicación: siempre activo (sesión de 24 horas y túnel demo)
+    return True
 

@@ -63,7 +63,7 @@ export const LoginPage: React.FC = () => {
       <div className="lis-login-card">
         <div className="lis-brand-header">
           <div className="lis-brand-badge">LIS</div>
-          <h1>Laboratorio Clínico</h1>
+          <h1>Laboratorio Clínico Metodista</h1>
           <p className="lis-brand-sub">Sistema de Gestión e Informes de Laboratorio</p>
         </div>
 

@@ -97,12 +97,21 @@ export const PacientesPage: React.FC = () => {
   const handleGuardado = (pacienteGuardado: PacienteDetalle) => {
     setModalFormAbierto(false);
     cargarPacientes();
-    navigate(`/pacientes/${pacienteGuardado.id}`);
+    if (!esAdmin && !pacienteEditando) {
+      // Salto directo a la creación de orden analítica sin pantalla intermedia redundante
+      navigate(`/ordenes/nueva?id_paciente=${pacienteGuardado.id}`);
+    } else {
+      navigate(`/pacientes/${pacienteGuardado.id}`);
+    }
   };
 
   const handleNavegarExistente = (idPacienteExistente: number) => {
     setModalFormAbierto(false);
-    navigate(`/pacientes/${idPacienteExistente}`);
+    if (!esAdmin) {
+      navigate(`/ordenes/nueva?id_paciente=${idPacienteExistente}`);
+    } else {
+      navigate(`/pacientes/${idPacienteExistente}`);
+    }
   };
 
   const calcularEdadTexto = (fn: string | null): string => {

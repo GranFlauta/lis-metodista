@@ -222,7 +222,7 @@ export const PacienteDetallePage: React.FC = () => {
             </p>
           </div>
 
-          {!esAdmin && (
+          {!esAdmin && ordenes.length > 0 && (
             <button
               type="button"
               className="lis-btn lis-btn-outline lis-btn-sm"
@@ -239,14 +239,18 @@ export const PacienteDetallePage: React.FC = () => {
             <p>Cargando órdenes del paciente...</p>
           </div>
         ) : ordenes.length === 0 ? (
-          <div style={{ padding: "2.5rem 1.5rem", textAlign: "center", color: "var(--text-muted)" }}>
-            <p style={{ fontWeight: 600, fontSize: "1rem", color: "var(--text-main)" }}>
-              No existen órdenes registradas para este paciente.
+          <div style={{ padding: "2.5rem 1.5rem", textAlign: "center" }}>
+            <p style={{ fontWeight: 600, fontSize: "14px", color: "var(--text-muted)", marginBottom: "1rem" }}>
+              Sin órdenes analíticas registradas aún para este paciente.
             </p>
             {!esAdmin && (
-              <p style={{ fontSize: "0.875rem", marginTop: "0.35rem" }}>
-                Haga clic en <strong>"+ Nueva Orden"</strong> para crear su primera solicitud analítica.
-              </p>
+              <button
+                type="button"
+                className="lis-btn lis-btn-primary"
+                onClick={() => navigate(`/ordenes/nueva?id_paciente=${paciente.id}`)}
+              >
+                + Crear Orden para este Paciente →
+              </button>
             )}
           </div>
         ) : (
