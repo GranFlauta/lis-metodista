@@ -13,7 +13,7 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
 from app.core.clock import ahora
-from app.core.config import settings
+from app.core.config import es_modo_demo, settings
 from app.core.database import get_db
 from app.core.errors import (
     DebeCambiarPasswordError,
@@ -133,10 +133,10 @@ def require_auth(
     if sesion.revocada_en is not None:
         esta_viva = False
         motivo_muerte = "Sesión revocada previamente."
-    elif sesion.expira_en and (sesion.expira_en.replace(tzinfo=now.tzinfo) if sesion.expira_en.tzinfo is None else sesion.expira_en) <= now:
+    elif not es_modo_demo() and sesion.expira_en and (sesion.expira_en.replace(tzinfo=now.tzinfo) if sesion.expira_en.tzinfo is None else sesion.expira_en) <= now:
         esta_viva = False
         motivo_muerte = "Tope absoluto de sesión alcanzado."
-    else:
+    elif not es_modo_demo():
         # Validar latido (sesion_muerta_tras_seg)
         ultimo_latido_tz = sesion.ultimo_latido.replace(tzinfo=now.tzinfo) if sesion.ultimo_latido.tzinfo is None else sesion.ultimo_latido
         if (now - ultimo_latido_tz).total_seconds() > config_sesion.muerta_tras_seg:
@@ -171,10 +171,11 @@ def require_auth(
             db.commit()
         raise SesionExpiradaError("Usuario inactivo o no encontrado.")
 
-    # 4. Si la ruta NO es heartbeat, renovar ultima_actividad
+    # 4. Si la ruta NO es heartbeat, renovar ultima_actividad y ultimo_latido
     path = request.url.path
     if not path.endswith("/heartbeat"):
         sesion.ultima_actividad = now
+        sesion.ultimo_latido = now
         db.commit()
 
     # 5. Si debe_cambiar_password y la ruta no está en la lista blanca -> 403 DEBE_CAMBIAR_PASSWORD

@@ -28,7 +28,7 @@ from app.api.deps import (
     require_auth,
 )
 from app.core.clock import ahora
-from app.core.config import settings
+from app.core.config import es_modo_demo, settings
 from app.core.database import get_db
 from app.core.errors import (
     CredencialesInvalidasError,
@@ -189,7 +189,8 @@ def login(
     # Crear fila en sesiones (expira_en = ahora + sesion_tope_absoluto_horas)
     raw_refresh_token, refresh_hash = generate_refresh_token()
     config_sesion = obtener_config_sesion(db)
-    expira_en = now + timedelta(hours=config_sesion.tope_absoluto_horas)
+    horas_tope = 8760 if es_modo_demo() else config_sesion.tope_absoluto_horas
+    expira_en = now + timedelta(hours=horas_tope)
 
     sesion = Sesion(
         id_usuario=usuario_db.id_usuario,
@@ -234,6 +235,7 @@ def login(
         rol=rol_nombre,
     )
 
+    inactividad_min = 1440 if es_modo_demo() else config_sesion.inactividad_min
     return TokenResponse(
         access_token=access_token,
         token_type="bearer",
@@ -242,7 +244,7 @@ def login(
         usuario=usuario_resumen,
         config_sesion=ConfigSesionResumenResponse(
             intervalo_latido_seg=config_sesion.intervalo_latido_seg,
-            inactividad_min=config_sesion.inactividad_min,
+            inactividad_min=inactividad_min,
         ),
     )
 
@@ -278,9 +280,9 @@ def refresh_token(
     esta_viva = True
     if not sesion or sesion.revocada_en is not None:
         esta_viva = False
-    elif sesion.expira_en and (sesion.expira_en.replace(tzinfo=now.tzinfo) if sesion.expira_en.tzinfo is None else sesion.expira_en) <= now:
+    elif not es_modo_demo() and sesion.expira_en and (sesion.expira_en.replace(tzinfo=now.tzinfo) if sesion.expira_en.tzinfo is None else sesion.expira_en) <= now:
         esta_viva = False
-    else:
+    elif not es_modo_demo():
         ultimo_latido_tz = sesion.ultimo_latido.replace(tzinfo=now.tzinfo) if sesion.ultimo_latido.tzinfo is None else sesion.ultimo_latido
         if (now - ultimo_latido_tz).total_seconds() > config_sesion.muerta_tras_seg:
             esta_viva = False
@@ -315,8 +317,9 @@ def refresh_token(
         delete_header = 'refresh_token=""; Path=/api/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT'
         raise SesionExpiradaError("Usuario inactivo.", headers={"Set-Cookie": delete_header})
 
-    # La reactivación renueva la actividad
+    # La reactivación renueva la actividad y el último latido
     sesion.ultima_actividad = now
+    sesion.ultimo_latido = now
     db.commit()
 
     rol_nombre = usuario.rol.nombre if usuario.rol else "BIOQUIMICO"
@@ -335,6 +338,7 @@ def refresh_token(
         rol=rol_nombre,
     )
 
+    inactividad_min = 1440 if es_modo_demo() else config_sesion.inactividad_min
     return TokenResponse(
         access_token=nuevo_access_token,
         token_type="bearer",
@@ -343,7 +347,7 @@ def refresh_token(
         usuario=usuario_resumen,
         config_sesion=ConfigSesionResumenResponse(
             intervalo_latido_seg=config_sesion.intervalo_latido_seg,
-            inactividad_min=config_sesion.inactividad_min,
+            inactividad_min=inactividad_min,
         ),
     )
 
@@ -375,10 +379,13 @@ def heartbeat(
     db.commit()
 
     config_sesion = obtener_config_sesion(db)
-    limite_inactividad_seg = config_sesion.inactividad_min * 60
-    ultima_act_tz = sesion.ultima_actividad.replace(tzinfo=now.tzinfo) if sesion.ultima_actividad.tzinfo is None else sesion.ultima_actividad
-    segundos_inactivo = (now - ultima_act_tz).total_seconds()
-    segundos_restantes = max(0, int(limite_inactividad_seg - segundos_inactivo))
+    if es_modo_demo():
+        segundos_restantes = 86400  # 24 horas en modo demo para evitar interrupciones en presentaciones
+    else:
+        limite_inactividad_seg = config_sesion.inactividad_min * 60
+        ultima_act_tz = sesion.ultima_actividad.replace(tzinfo=now.tzinfo) if sesion.ultima_actividad.tzinfo is None else sesion.ultima_actividad
+        segundos_inactivo = (now - ultima_act_tz).total_seconds()
+        segundos_restantes = max(0, int(limite_inactividad_seg - segundos_inactivo))
 
     return HeartbeatResponse(
         intervalo_latido_seg=config_sesion.intervalo_latido_seg,

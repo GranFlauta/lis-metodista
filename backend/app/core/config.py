@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=(".env", "backend/.env"), extra="ignore")
+    model_config = SettingsConfigDict(env_file=(".env", "backend/.env", "../.env"), extra="ignore")
 
     database_url: str
     jwt_secret: str
@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     lockout_minutes: int = 15
     cookie_secure: bool = True                  # Cambiar a false si estás en desarrollo local sin HTTPS
     enable_docs: bool = False                   # D35-01: /docs y /openapi.json solo si es true
+    modo_demo: bool = False                     # Habilita /docs, CORS y SPA para presentaciones por ngrok
+    sesion_indefinida: bool = False             # Si es true, la sesión no expira por inactividad ni falta de latidos
 
     @model_validator(mode="after")
     def validate_jwt_secret(self) -> Settings:
@@ -29,4 +31,11 @@ class Settings(BaseSettings):
         return self
 
 settings = Settings()  # type: ignore[call-arg]
+
+
+def es_modo_demo() -> bool:
+    """Indica si el modo demo o de sesión indefinida está activo fuera de pruebas unitarias."""
+    import sys
+    en_pruebas = "unittest" in sys.modules or "pytest" in sys.modules
+    return bool((settings.modo_demo or settings.sesion_indefinida) and not en_pruebas)
 
