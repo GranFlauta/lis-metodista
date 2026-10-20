@@ -260,10 +260,11 @@ def refresh_token(
     elif sesion.expira_en and (sesion.expira_en.replace(tzinfo=now.tzinfo) if sesion.expira_en.tzinfo is None else sesion.expira_en) <= now:
         esta_viva = False
     else:
-        ultimo_latido_tz = sesion.ultimo_latido.replace(tzinfo=now.tzinfo) if sesion.ultimo_latido.tzinfo is None else sesion.ultimo_latido
-        if (now - ultimo_latido_tz).total_seconds() > settings.session_dead_after_seconds:
-            esta_viva = False
-        else:
+        if settings.session_dead_after_seconds > 0:
+            ultimo_latido_tz = sesion.ultimo_latido.replace(tzinfo=now.tzinfo) if sesion.ultimo_latido.tzinfo is None else sesion.ultimo_latido
+            if (now - ultimo_latido_tz).total_seconds() > settings.session_dead_after_seconds:
+                esta_viva = False
+        if esta_viva and settings.idle_timeout_minutes > 0:
             ultima_act_tz = sesion.ultima_actividad.replace(tzinfo=now.tzinfo) if sesion.ultima_actividad.tzinfo is None else sesion.ultima_actividad
             if (now - ultima_act_tz).total_seconds() > (settings.idle_timeout_minutes * 60):
                 esta_viva = False

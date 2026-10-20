@@ -135,13 +135,14 @@ def require_auth(
         esta_viva = False
         motivo_muerte = "Tope absoluto de sesión alcanzado."
     else:
-        # Validar latido (session_dead_after_seconds = 150)
-        ultimo_latido_tz = sesion.ultimo_latido.replace(tzinfo=now.tzinfo) if sesion.ultimo_latido.tzinfo is None else sesion.ultimo_latido
-        if (now - ultimo_latido_tz).total_seconds() > settings.session_dead_after_seconds:
-            esta_viva = False
-            motivo_muerte = f"Sin latido por más de {settings.session_dead_after_seconds} segundos."
-        else:
-            # Validar inactividad (idle_timeout_minutes = 30)
+        # Validar latido (session_dead_after_seconds)
+        if settings.session_dead_after_seconds > 0:
+            ultimo_latido_tz = sesion.ultimo_latido.replace(tzinfo=now.tzinfo) if sesion.ultimo_latido.tzinfo is None else sesion.ultimo_latido
+            if (now - ultimo_latido_tz).total_seconds() > settings.session_dead_after_seconds:
+                esta_viva = False
+                motivo_muerte = f"Sin latido por más de {settings.session_dead_after_seconds} segundos."
+        if esta_viva and settings.idle_timeout_minutes > 0:
+            # Validar inactividad (idle_timeout_minutes)
             ultima_act_tz = sesion.ultima_actividad.replace(tzinfo=now.tzinfo) if sesion.ultima_actividad.tzinfo is None else sesion.ultima_actividad
             if (now - ultima_act_tz).total_seconds() > (settings.idle_timeout_minutes * 60):
                 esta_viva = False
