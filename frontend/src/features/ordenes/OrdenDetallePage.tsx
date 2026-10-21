@@ -18,6 +18,8 @@ import {
 } from "../../api/ordenes";
 import { ApiError } from "../../api/client";
 import { useAuth } from "../auth/AuthProvider";
+import { obtenerEstudiosAgregados } from "../../utils/ordenesMemoria";
+import { capitalizarNombrePropio } from "../../utils/formatoTexto";
 
 export const OrdenDetallePage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -299,7 +301,7 @@ export const OrdenDetallePage: React.FC = () => {
         </div>
       )}
 
-      {/* Resumen del Paciente */}
+      {/* Cabecera Unificada: Paciente, Orden y Muestra (§6) */}
       <div className="lis-table-card" style={{ marginBottom: "1.25rem" }}>
         <div
           style={{
@@ -308,11 +310,13 @@ export const OrdenDetallePage: React.FC = () => {
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
+            flexWrap: "wrap",
+            gap: "0.5rem",
           }}
         >
           <div>
-            <h3 style={{ fontSize: "1.05rem", fontWeight: 700, margin: 0 }}>
-              Paciente: {orden.paciente.apellido_paterno}{" "}
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 700, margin: 0, color: "var(--text-main)" }}>
+              {orden.paciente.apellido_paterno}{" "}
               {orden.paciente.apellido_materno ? `${orden.paciente.apellido_materno} ` : ""}
               {orden.paciente.nombres}
             </h3>
@@ -321,41 +325,29 @@ export const OrdenDetallePage: React.FC = () => {
                 ? `CI: ${orden.paciente.ci}${
                     orden.paciente.ci_complemento ? `-${orden.paciente.ci_complemento}` : ""
                   }`
-                : "Sin CI registrado"}
+                : "Sin CI registrado"}{" "}
+              • {orden.paciente.sexo === "M" ? "Masculino (M)" : "Femenino (F)"}
+              {orden.edad_anios !== null ? ` • ${orden.edad_anios} años` : ""}
             </span>
           </div>
 
-          <Link
-            to={`/pacientes/${orden.paciente.id}`}
-            className="lis-btn lis-btn-text lis-btn-sm"
-            style={{ fontWeight: 600 }}
-          >
-            Ver Ficha Completa →
-          </Link>
+          <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+            <span className="lis-chip lis-chip-primary" style={{ fontWeight: 700 }}>
+              {orden.perfil ? orden.perfil.nombre : "Selección personalizada"}
+            </span>
+          </div>
         </div>
 
         <div className="lis-patient-summary" style={{ padding: "1.25rem 1.5rem" }}>
           <div className="lis-info-field">
-            <span className="lis-info-label">Sexo Biológico</span>
-            <span className="lis-info-value">
-              {orden.paciente.sexo === "M" ? "Masculino (M)" : "Femenino (F)"}
-            </span>
-          </div>
-          <div className="lis-info-field">
             <span className="lis-info-label">Fecha de Nacimiento</span>
-            <span className="lis-info-value">
-              {orden.paciente.fecha_nacimiento || "No registrada"}
-            </span>
+            <span className="lis-info-value">{orden.paciente.fecha_nacimiento || "No registrada"}</span>
           </div>
           <div className="lis-info-field">
-            <span className="lis-info-label">Edad en la Orden</span>
+            <span className="lis-info-label">Edad Registrada</span>
             <span className="lis-info-value">
               {orden.edad_anios !== null
-                ? `${orden.edad_anios} años${
-                    orden.edad_meses !== null && orden.edad_meses > 0
-                      ? `, ${orden.edad_meses} meses`
-                      : ""
-                  }`
+                ? `${orden.edad_anios} años${orden.edad_meses ? `, ${orden.edad_meses} m` : ""}`
                 : "No calculada"}
             </span>
           </div>
@@ -365,46 +357,19 @@ export const OrdenDetallePage: React.FC = () => {
               {orden.autor.nombres} {orden.autor.apellido_paterno}
             </span>
           </div>
-        </div>
-      </div>
-
-      {/* Datos Clínicos de Cabecera */}
-      <div className="lis-table-card" style={{ marginBottom: "1.25rem" }}>
-        <div style={{ padding: "1rem 1.5rem", borderBottom: "1px solid var(--border-color)" }}>
-          <h3 style={{ fontSize: "1.05rem", fontWeight: 700, margin: 0 }}>
-            Datos de la Orden y Muestra
-          </h3>
-        </div>
-
-        <div className="lis-patient-summary" style={{ padding: "1.25rem 1.5rem" }}>
-          <div className="lis-info-field">
-            <span className="lis-info-label">Perfil de Catálogo</span>
-            <span className="lis-info-value">
-              {orden.perfil ? (
-                <span className="lis-chip lis-chip-primary">
-                  {orden.perfil.nombre} ({orden.perfil.codigo})
-                </span>
-              ) : (
-                <span style={{ color: "var(--text-muted)" }}>Selección personalizada de estudios</span>
-              )}
-            </span>
-          </div>
 
           <div className="lis-info-field">
-            <span className="lis-info-label">Origen de la Solicitud</span>
+            <span className="lis-info-label">Origen de Solicitud</span>
             <span className="lis-info-value">{orden.origen_solicitud || "No especificado"}</span>
           </div>
-
           <div className="lis-info-field">
             <span className="lis-info-label">Médico Solicitante</span>
             <span className="lis-info-value">{orden.medico_solicitante || "No especificado"}</span>
           </div>
-
           <div className="lis-info-field">
             <span className="lis-info-label">Pieza / Sala / Cama</span>
             <span className="lis-info-value">{orden.pieza || "No especificada"}</span>
           </div>
-
           <div className="lis-info-field">
             <span className="lis-info-label">Toma de Muestra</span>
             <span className="lis-info-value">
@@ -413,7 +378,6 @@ export const OrdenDetallePage: React.FC = () => {
                 : "Pendiente de registro"}
             </span>
           </div>
-
           <div className="lis-info-field">
             <span className="lis-info-label">Última Modificación</span>
             <span className="lis-info-value">
@@ -427,7 +391,12 @@ export const OrdenDetallePage: React.FC = () => {
       <div className="lis-table-card" style={{ marginBottom: "1.5rem" }}>
         <div style={{ padding: "1rem 1.5rem", borderBottom: "1px solid var(--border-color)" }}>
           <h3 style={{ fontSize: "1.05rem", fontWeight: 700, margin: 0 }}>
-            Estudios Solicitados ({orden.estudios.length})
+            Estudios Solicitados (
+            {orden.estudios.length +
+              obtenerEstudiosAgregados(orden.id).filter(
+                (extra) => !orden.estudios.some((e) => e.codigo === extra.codigo)
+              ).length}
+            )
           </h3>
           <p className="lis-page-sub" style={{ marginTop: "0.25rem" }}>
             Determinaciones congeladas según la versión del catálogo al momento de crear la orden.
@@ -436,7 +405,16 @@ export const OrdenDetallePage: React.FC = () => {
 
         <div style={{ padding: "1.25rem 1.5rem" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
-            {orden.estudios.map((est) => (
+            {[
+              ...orden.estudios,
+              ...obtenerEstudiosAgregados(orden.id)
+                .filter((extra) => !orden.estudios.some((e) => e.codigo === extra.codigo))
+                .map((extra) => ({
+                  codigo: extra.codigo,
+                  nombre: extra.nombre,
+                  grupos: null,
+                })),
+            ].map((est) => (
               <div
                 key={est.codigo}
                 style={{
@@ -496,25 +474,6 @@ export const OrdenDetallePage: React.FC = () => {
         </div>
       </div>
 
-      {/* Tarjeta de Acceso a Captura de Resultados */}
-      <div className="lis-table-card" style={{ padding: "1.25rem 1.5rem", marginBottom: "1.5rem", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0" }}>
-        <div>
-          <h4 style={{ fontSize: "1.05rem", fontWeight: 700, color: "#166534", marginBottom: "0.25rem" }}>
-            Captura de Determinaciones, Fórmulas Clínicas y Banderas
-          </h4>
-          <p style={{ margin: 0, fontSize: "0.9rem", color: "#15803d" }}>
-            Ingrese resultados numéricos, cualitativos, cálculo síncrono en vivo, banderas biológicas por rango y control de completitud.
-          </p>
-        </div>
-        <Link
-          to={`/ordenes/${orden.id}/captura`}
-          className="lis-btn lis-btn-primary"
-          style={{ whiteSpace: "nowrap" }}
-        >
-          {esAdmin ? "Ver Captura de Resultados →" : "Ingresar a Captura de Resultados →"}
-        </Link>
-      </div>
-
       {/* Modal de Edición de Cabecera (PATCH) */}
       {modalEditarAbierto && (
         <div className="lis-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-editar-cabecera">
@@ -553,7 +512,7 @@ export const OrdenDetallePage: React.FC = () => {
                     id="edit-medico"
                     type="text"
                     value={editMedico}
-                    onChange={(e) => setEditMedico(e.target.value)}
+                    onChange={(e) => setEditMedico(capitalizarNombrePropio(e.target.value, editMedico))}
                     placeholder="Ej. Dra. Carmen Morales"
                     maxLength={150}
                   />

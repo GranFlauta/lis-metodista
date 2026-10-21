@@ -24,7 +24,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { ApiError } from "../../api/client";
 
 export const UsuariosPage: React.FC = () => {
-  const { usuario: usuarioActual } = useAuth();
+  const { usuario: usuarioActual, logout } = useAuth();
 
   const [usuarios, setUsuarios] = useState<UsuarioDetalle[]>([]);
   const [cargando, setCargando] = useState<boolean>(true);
@@ -207,6 +207,7 @@ export const UsuariosPage: React.FC = () => {
 
   // Reset de contraseña (con confirmación y muestra de clave temporal única)
   const handleResetPassword = async (u: UsuarioDetalle) => {
+    const esMismoUsuario = usuarioActual && u.id === usuarioActual.id;
     const confirmado = window.confirm(
       `¿Desea restablecer la contraseña de '${u.usuario}'?\nSe generará una nueva contraseña temporal y se cerrarán sus sesiones activas.`
     );
@@ -218,7 +219,9 @@ export const UsuariosPage: React.FC = () => {
       setPasswordTemporal(resp.password_temporal);
       setCopiado(false);
       setModalClaveAbierto(true);
-      cargarUsuarios();
+      if (!esMismoUsuario) {
+        cargarUsuarios();
+      }
     } catch (err: unknown) {
       alert(err instanceof ApiError ? err.message : "Error al resetear contraseña.");
     }
@@ -234,10 +237,17 @@ export const UsuariosPage: React.FC = () => {
 
   // Cerrar modal de clave temporal y ELIMINAR el valor del estado (§9)
   const handleCerrarModalClave = () => {
+    const eraMismoUsuario =
+      usuarioActual && usuarioClaveDestino.toLowerCase() === usuarioActual.usuario.toLowerCase();
     setPasswordTemporal(null);
     setUsuarioClaveDestino("");
     setCopiado(false);
     setModalClaveAbierto(false);
+    if (eraMismoUsuario) {
+      logout();
+    } else {
+      cargarUsuarios();
+    }
   };
 
   return (

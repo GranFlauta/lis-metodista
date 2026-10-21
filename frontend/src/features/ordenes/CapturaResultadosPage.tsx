@@ -35,6 +35,15 @@ import {
   OrdenDetalle,
   AdvertenciaSolapamiento,
 } from "../../api/ordenes";
+import {
+  obtenerEstudiosCatalogoApi,
+  EstudioCatalogo,
+} from "../../api/catalogo";
+import {
+  obtenerEstudiosAgregados,
+  agregarEstudioAOrdenMemoria,
+} from "../../utils/ordenesMemoria";
+import { construirEstudioCapturaPlantilla } from "../../utils/catalogoParametros";
 import { ApiError } from "../../api/client";
 
 export const CapturaResultadosPage: React.FC = () => {
@@ -49,6 +58,10 @@ export const CapturaResultadosPage: React.FC = () => {
   // Estados de datos
   const [captura, setCaptura] = useState<CapturaOrdenResponse | null>(null);
   const [ordenDetalle, setOrdenDetalle] = useState<OrdenDetalle | null>(null);
+  const [catalogoEstudios, setCatalogoEstudios] = useState<EstudioCatalogo[]>([]);
+  const [estudioActivoCodigo, setEstudioActivoCodigo] = useState<string>("");
+  const codigosPermitidosBackendRef = useRef<Set<string>>(new Set());
+
   const [configLab, setConfigLab] = useState<ConfiguracionLaboratorio>({
     nombre_laboratorio: "Laboratorio Clínico Metodista",
     separador_decimal: ",",
@@ -89,24 +102,54 @@ export const CapturaResultadosPage: React.FC = () => {
       setCargando(true);
       setErrorGeneral(null);
       try {
-        const [respConfig, respCaptura, respDetalle] = await Promise.all([
+        const [respConfig, respCaptura, respDetalle, respCatalogo] = await Promise.all([
           getConfiguracionLaboratorioApi().catch(() => ({
             nombre_laboratorio: "Laboratorio Clínico Metodista",
             separador_decimal: ",",
           })),
           getCapturaOrdenApi(ordenId),
           obtenerOrdenApi(ordenId).catch(() => null),
+          obtenerEstudiosCatalogoApi().catch(() => []),
         ]);
 
         if (!activo) return;
 
+        // Registrar parámetros oficiales permitidos para persistir en backend
+        codigosPermitidosBackendRef.current = new Set();
+        respCaptura.estudios.forEach((est: EstudioCaptura) => {
+          est.secciones.forEach((sec: SeccionCaptura) => {
+            sec.parametros.forEach((p: ParametroCaptura) => {
+              codigosPermitidosBackendRef.current.add(p.codigo);
+            });
+          });
+        });
+
+        // Combinar con estudios añadidos en memoria durante la sesión
+        const extrasMemoria = obtenerEstudiosAgregados(ordenId);
+        const estudiosCombinados: EstudioCaptura[] = [...respCaptura.estudios];
+        for (const ext of extrasMemoria) {
+          if (!estudiosCombinados.some((e) => e.codigo === ext.codigo)) {
+            estudiosCombinados.push(construirEstudioCapturaPlantilla(ext.codigo, ext.nombre));
+          }
+        }
+
+        const capturaCompleta: CapturaOrdenResponse = {
+          ...respCaptura,
+          estudios: estudiosCombinados,
+        };
+
         setConfigLab(respConfig);
-        setCaptura(respCaptura);
+        setCatalogoEstudios(respCatalogo);
+        setCaptura(capturaCompleta);
         setOrdenDetalle(respDetalle);
+
+        if (estudiosCombinados.length > 0) {
+          setEstudioActivoCodigo((prev) => (prev ? prev : estudiosCombinados[0].codigo));
+        }
 
         // Inicializar mapa de valores en formulario
         const mapaInicial: Record<string, string> = {};
-        respCaptura.estudios.forEach((est: EstudioCaptura) => {
+        estudiosCombinados.forEach((est: EstudioCaptura) => {
           est.secciones.forEach((sec: SeccionCaptura) => {
             sec.parametros.forEach((p: ParametroCaptura) => {
               if (!p.es_calculado && p.valor !== null) {
@@ -194,7 +237,7 @@ export const CapturaResultadosPage: React.FC = () => {
         captura.estudios.forEach((est) => {
           est.secciones.forEach((sec) => {
             sec.parametros.forEach((p) => {
-              if (!p.es_calculado) {
+              if (!p.es_calculado && codigosPermitidosBackendRef.current.has(p.codigo)) {
                 const val = valoresActuales[p.codigo];
                 if (val !== undefined && val.trim() !== "") {
                   payloadValores[p.codigo] = val.trim();
@@ -206,8 +249,15 @@ export const CapturaResultadosPage: React.FC = () => {
           });
         });
 
-        const resp = await calcularResultadosApi(ordenId, payloadValores);
-        setCaptura(resp);
+        if (Object.keys(payloadValores).length > 0) {
+          const resp = await calcularResultadosApi(ordenId, payloadValores);
+          setCaptura((prev) => {
+            if (!prev) return resp;
+            const codigosResp = new Set(resp.estudios.map((e) => e.codigo));
+            const extras = prev.estudios.filter((e) => !codigosResp.has(e.codigo));
+            return { ...resp, estudios: [...resp.estudios, ...extras] };
+          });
+        }
       } catch (err) {
         console.warn("Error en vista previa de cálculo síncrono:", err);
       }
@@ -222,12 +272,37 @@ export const CapturaResultadosPage: React.FC = () => {
       const cambios = cambiosPendientes || { ...valoresModificadosRef.current };
       if (Object.keys(cambios).length === 0) return;
 
+      // Filtrar solo cambios de determinaciones reconocidas por el backend
+      const cambiosBackend: Record<string, string | null> = {};
+      Object.entries(cambios).forEach(([k, v]) => {
+        if (codigosPermitidosBackendRef.current.has(k)) {
+          cambiosBackend[k] = v;
+        }
+      });
+
+      if (Object.keys(cambiosBackend).length === 0) {
+        // Los cambios corresponden a determinaciones en memoria volátil de la sesión
+        Object.keys(cambios).forEach((k) => {
+          delete valoresModificadosRef.current[k];
+        });
+        const ahora = new Date();
+        const horaStr = ahora.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        setHoraUltimoGuardado(horaStr);
+        setEstadoGuardado("guardado");
+        return;
+      }
+
       setEstadoGuardado("guardando");
       setErrorGuardadoMensaje(null);
 
       try {
-        const resp = await guardarResultadosApi(ordenId, cambios);
-        setCaptura(resp);
+        const resp = await guardarResultadosApi(ordenId, cambiosBackend);
+        setCaptura((prev) => {
+          if (!prev) return resp;
+          const codigosResp = new Set(resp.estudios.map((e) => e.codigo));
+          const extras = prev.estudios.filter((e) => !codigosResp.has(e.codigo));
+          return { ...resp, estudios: [...resp.estudios, ...extras] };
+        });
         Object.keys(cambios).forEach((k) => {
           delete valoresModificadosRef.current[k];
         });
@@ -282,7 +357,12 @@ export const CapturaResultadosPage: React.FC = () => {
     setErrorGuardadoMensaje(null);
     try {
       const resp = await confirmarDefectosApi(ordenId);
-      setCaptura(resp);
+      setCaptura((prev) => {
+        if (!prev) return resp;
+        const codigosResp = new Set(resp.estudios.map((e) => e.codigo));
+        const extras = prev.estudios.filter((e) => !codigosResp.has(e.codigo));
+        return { ...resp, estudios: [...resp.estudios, ...extras] };
+      });
       const nuevoMapa = { ...valoresForm };
       resp.estudios.forEach((est) => {
         est.secciones.forEach((sec) => {
@@ -339,12 +419,25 @@ export const CapturaResultadosPage: React.FC = () => {
   // Enfocar campo pendiente al hacer clic
   const enfocarParametro = (codigo: string) => {
     setMostrarMenuPendientes(false);
-    const el = document.getElementById(`input-${codigo}`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      el.focus();
-      if (el instanceof HTMLInputElement) el.select();
+    if (captura) {
+      for (const est of captura.estudios) {
+        const tieneParam = est.secciones.some((sec) =>
+          sec.parametros.some((p) => p.codigo === codigo)
+        );
+        if (tieneParam) {
+          setEstudioActivoCodigo(est.codigo);
+          break;
+        }
+      }
     }
+    setTimeout(() => {
+      const el = document.getElementById(`input-${codigo}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.focus();
+        if (el instanceof HTMLInputElement) el.select();
+      }
+    }, 60);
   };
 
   // Formatear valor numérico para la visualización
@@ -444,6 +537,49 @@ export const CapturaResultadosPage: React.FC = () => {
   }
 
   const { orden, estudios, completitud } = captura;
+
+  // Separar estudios asignados y no asignados del catálogo (§3.A)
+  const codigosAsignados = new Set(estudios.map((e) => e.codigo));
+  const estudiosNoAsignados = catalogoEstudios.filter((c) => !codigosAsignados.has(c.codigo));
+
+  // Estudio activo actualmente (puede ser asignado o uno no asignado seleccionado)
+  const estudioActivo = estudios.find((e) => e.codigo === estudioActivoCodigo) || (estudios.length > 0 ? estudios[0] : null);
+  const estudioNoAsignadoSeleccionado = !estudios.some((e) => e.codigo === estudioActivoCodigo)
+    ? estudiosNoAsignados.find((c) => c.codigo === estudioActivoCodigo)
+    : null;
+  const indiceEstudioActivo = estudioActivo
+    ? estudios.findIndex((e) => e.codigo === estudioActivo.codigo)
+    : -1;
+
+  const handleIrAnterior = () => {
+    if (indiceEstudioActivo > 0) {
+      setEstudioActivoCodigo(estudios[indiceEstudioActivo - 1].codigo);
+    }
+  };
+
+  const handleIrSiguiente = () => {
+    if (indiceEstudioActivo >= 0 && indiceEstudioActivo < estudios.length - 1) {
+      if (estadoGuardado === "modificado") {
+        ejecutarGuardado();
+      }
+      setEstudioActivoCodigo(estudios[indiceEstudioActivo + 1].codigo);
+    }
+  };
+
+  const handleAnadirEstudioAOrden = (estCat: EstudioCatalogo) => {
+    const nuevoEstudio = construirEstudioCapturaPlantilla(estCat.codigo, estCat.nombre);
+    agregarEstudioAOrdenMemoria(ordenId, estCat);
+    setCaptura((prev) => {
+      if (!prev) return prev;
+      const yaExiste = prev.estudios.some((e) => e.codigo === estCat.codigo);
+      if (yaExiste) return prev;
+      return {
+        ...prev,
+        estudios: [...prev.estudios, nuevoEstudio],
+      };
+    });
+    setEstudioActivoCodigo(estCat.codigo);
+  };
 
   // Datos del paciente y orden formateados
   const nombrePaciente = ordenDetalle
@@ -772,27 +908,22 @@ export const CapturaResultadosPage: React.FC = () => {
                 )}
               </div>
 
-              {/* Confirmar defectos si existen */}
-              {completitud.sin_confirmar.length > 0 && (
-                <button
-                  type="button"
-                  className="lis-btn lis-btn-outline lis-btn-sm"
-                  onClick={handleConfirmarDefectos}
-                  title="Confirmar todos los valores por defecto virtuales"
-                >
-                  Confirmar valores por defecto ({completitud.sin_confirmar.length})
-                </button>
-              )}
-
-              {/* Botón Guardar ahora */}
+              {/* Botón único de Guardado y Confirmación (§6) */}
               <button
                 type="button"
                 className="lis-btn lis-btn-primary lis-btn-sm"
-                onClick={() => ejecutarGuardado()}
+                onClick={async () => {
+                  if (completitud.sin_confirmar.length > 0) {
+                    await handleConfirmarDefectos();
+                  }
+                  await ejecutarGuardado();
+                }}
                 disabled={estadoGuardado === "guardando"}
-                title="Persistir inmediatamente todos los valores modificados"
+                title="Guardar todos los valores modificados y confirmar valores pendientes"
               >
-                Guardar ahora
+                {completitud.sin_confirmar.length > 0
+                  ? `Guardar y confirmar (${completitud.sin_confirmar.length})`
+                  : "Guardar resultados"}
               </button>
             </>
           )}
@@ -825,45 +956,134 @@ export const CapturaResultadosPage: React.FC = () => {
         }}
       >
         <div className="lis-captura-layout">
-          {/* Izquierda (≈ 55 %) — Hoja de Captura Fiel al Excel */}
+          {/* Izquierda (≈ 55 %) — Hoja de Captura Fiel al Excel (Modo Enfocado §2) */}
           <div className="lis-captura-hoja">
-            <div className="lis-captura-hoja-grid">
-              {estudios.map((estudio) => {
-                const conteo = calcularConteoEstudio(estudio);
-                return (
-                  <div key={estudio.codigo} className="lis-captura-estudio-box">
-                    {/* Encabezado del estudio (ej. Hemograma 9/12) */}
-                    <div className="lis-captura-estudio-header">
-                      <span>{estudio.nombre}</span>
-                      <span className="lis-chip" style={{ fontSize: "11px", padding: "1px 6px" }}>
-                        {conteo.completos}/{conteo.total}
-                      </span>
-                    </div>
-
-                    {/* Validaciones de reglas cruzadas del estudio si aplican */}
-                    {estudio.validaciones && estudio.validaciones.length > 0 && (
-                      <div style={{ padding: "4px 8px", display: "flex", flexDirection: "column", gap: "4px" }}>
-                        {estudio.validaciones.map((val, idx) => (
-                          <div
-                            key={idx}
-                            className={`lis-alert ${
-                              val.severidad === "ERROR" ? "lis-alert-error" : "lis-alert-warning"
-                            }`}
-                            style={{ padding: "4px 8px", margin: 0, fontSize: "12px" }}
-                          >
-                            <strong>{val.severidad === "ERROR" ? "[Error]" : "[Advertencia]"}</strong> {val.mensaje}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Secciones y tabla del estudio */}
-                    <div style={{ padding: "6px" }}>
-                      {estudio.secciones.map((sec) => renderizarSeccion(sec))}
-                    </div>
+            <div className="lis-captura-estudio-scroll-area">
+              {estudioNoAsignadoSeleccionado ? (
+                <div className="lis-captura-unassigned-card">
+                  <span className="lis-chip" style={{ marginBottom: "12px", fontSize: "12px" }}>
+                    Estudio en Catálogo Clínico
+                  </span>
+                  <h3>{estudioNoAsignadoSeleccionado.nombre}</h3>
+                  <p>
+                    Este estudio aún no forma parte de la solicitud analítica de esta orden clínica.
+                    Al pulsar el botón inferior, se incorporará de inmediato para capturar sus valores,
+                    se actualizará la vista previa del informe de la derecha y se mantendrá en memoria
+                    incluso al volver al detalle de la orden.
+                  </p>
+                  <button
+                    type="button"
+                    className="lis-btn lis-btn-primary"
+                    onClick={() => handleAnadirEstudioAOrden(estudioNoAsignadoSeleccionado)}
+                  >
+                    + Añadir estudio a esta orden
+                  </button>
+                </div>
+              ) : estudioActivo ? (
+                <div key={estudioActivo.codigo} className="lis-captura-estudio-box">
+                  {/* Encabezado del estudio enfocado */}
+                  <div className="lis-captura-estudio-header">
+                    <span>
+                      {indiceEstudioActivo + 1}. {estudioActivo.nombre}
+                    </span>
+                    <span className="lis-chip" style={{ fontSize: "11px", padding: "1px 6px" }}>
+                      {calcularConteoEstudio(estudioActivo).completos}/{calcularConteoEstudio(estudioActivo).total}
+                    </span>
                   </div>
-                );
-              })}
+
+                  {/* Validaciones de reglas cruzadas del estudio si aplican */}
+                  {estudioActivo.validaciones && estudioActivo.validaciones.length > 0 && (
+                    <div style={{ padding: "4px 8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                      {estudioActivo.validaciones.map((val, idx) => (
+                        <div
+                          key={idx}
+                          className={`lis-alert ${
+                            val.severidad === "ERROR" ? "lis-alert-error" : "lis-alert-warning"
+                          }`}
+                          style={{ padding: "4px 8px", margin: 0, fontSize: "12px" }}
+                        >
+                          <strong>{val.severidad === "ERROR" ? "[Error]" : "[Advertencia]"}</strong> {val.mensaje}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Secciones y tabla del estudio */}
+                  <div style={{ padding: "6px" }}>
+                    {estudioActivo.secciones.map((sec) => renderizarSeccion(sec))}
+                  </div>
+                </div>
+              ) : (
+                <div className="lis-table-card" style={{ padding: "24px", textAlign: "center" }}>
+                  <p style={{ color: "var(--text-muted)" }}>Seleccione un estudio en el paginador inferior.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Barra Fija Inferior con Pestañas y Paginador Estable (§3 y §4) */}
+            <div className="lis-captura-paginador-bar" role="navigation" aria-label="Navegación entre estudios">
+              <button
+                type="button"
+                className="lis-captura-nav-btn"
+                onClick={handleIrAnterior}
+                disabled={indiceEstudioActivo <= 0 || !!estudioNoAsignadoSeleccionado}
+                title="Ir al estudio anterior asignado"
+              >
+                &lt; Anterior
+              </button>
+
+              <div className="lis-captura-tabs-scroll">
+                {/* 1. Primeros puestos: Estudios ya asignados a la orden */}
+                {estudios.map((est, idx) => {
+                  const isActive = !estudioNoAsignadoSeleccionado && est.codigo === estudioActivo?.codigo;
+                  return (
+                    <button
+                      key={est.codigo}
+                      type="button"
+                      className={`lis-captura-tab-btn ${isActive ? "is-active" : "is-assigned"}`}
+                      onClick={() => setEstudioActivoCodigo(est.codigo)}
+                      title={`Estudio asignado: ${est.nombre}`}
+                    >
+                      <span>
+                        {idx + 1}. {est.nombre}
+                      </span>
+                    </button>
+                  );
+                })}
+
+                {/* 2. Puestos finales: Estudios disponibles no asignados */}
+                {estudiosNoAsignados.map((est, idx) => {
+                  const isPreview = estudioNoAsignadoSeleccionado?.codigo === est.codigo;
+                  const numItem = estudios.length + idx + 1;
+                  return (
+                    <button
+                      key={est.codigo}
+                      type="button"
+                      className={`lis-captura-tab-btn is-unassigned ${isPreview ? "is-preview-active" : ""}`}
+                      onClick={() => setEstudioActivoCodigo(est.codigo)}
+                      title={`No asignado: Clic para ver o añadir ${est.nombre}`}
+                    >
+                      <span>
+                        {numItem}. {est.nombre}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                className="lis-captura-nav-btn"
+                onClick={handleIrSiguiente}
+                disabled={
+                  indiceEstudioActivo < 0 ||
+                  indiceEstudioActivo >= estudios.length - 1 ||
+                  !!estudioNoAsignadoSeleccionado
+                }
+                title="Validar y avanzar al siguiente estudio asignado"
+              >
+                Siguiente &gt;
+              </button>
             </div>
           </div>
 
@@ -897,10 +1117,43 @@ export const CapturaResultadosPage: React.FC = () => {
                 </button>
               </div>
 
-              {/* Membrete del laboratorio */}
-              <div className="lis-preview-lab-header">
-                <h2 className="lis-preview-lab-title">{configLab.nombre_laboratorio}</h2>
-                <div className="lis-preview-lab-sub">Informe de Análisis Clínicos</div>
+              {/* Membrete oficial del Hospital Metodista (§6 y §7) */}
+              <div
+                className="lis-preview-lab-header"
+                style={{
+                  backgroundColor: "#ffffff",
+                  padding: "10px 0 8px 0",
+                  textAlign: "center",
+                  borderBottom: "2px solid #E51900",
+                  marginBottom: "12px",
+                }}
+              >
+                <img
+                  src="/logo-metodista.svg"
+                  alt="Hospital Metodista - Al servicio de tu salud"
+                  style={{
+                    maxHeight: "75px",
+                    width: "auto",
+                    objectFit: "contain",
+                    margin: "0 auto 6px auto",
+                    display: "block",
+                  }}
+                />
+                <h2
+                  style={{
+                    fontSize: "13.5px",
+                    fontWeight: 800,
+                    letterSpacing: "0.06em",
+                    color: "#0f172a",
+                    textTransform: "uppercase",
+                    margin: "2px 0 0 0",
+                  }}
+                >
+                  Laboratorio de Análisis Clínicos
+                </h2>
+                <div style={{ fontSize: "11.5px", color: "#64748b", fontWeight: 600 }}>
+                  Informe de Determinaciones Clínicas
+                </div>
               </div>
 
               {/* Bloque del paciente */}

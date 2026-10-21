@@ -156,9 +156,43 @@ export const Layout: React.FC = () => {
         aria-label="Menú principal"
       >
         <div className="lis-sidebar-header">
-          <Link to="/" className="lis-sidebar-brand" title="LIS Laboratorio Clínico">
-            <span className="lis-sidebar-logo">LIS</span>
-            {sidebarExpandido && <span className="lis-sidebar-title">Laboratorio Metodista</span>}
+          <Link to="/" className="lis-sidebar-brand" title="Hospital Metodista - Laboratorio Clínico">
+            <div
+              style={{
+                width: "34px",
+                height: "34px",
+                borderRadius: "50%",
+                backgroundColor: "#ffffff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                boxShadow: "0 1px 3px rgba(0,0,0,0.18)",
+                overflow: "hidden",
+                padding: "2px",
+              }}
+            >
+              <img
+                src="/logo-metodista.svg"
+                alt="Hospital Metodista"
+                style={{ width: "28px", height: "28px", objectFit: "contain" }}
+              />
+            </div>
+            {sidebarExpandido && (
+              <span
+                className="lis-sidebar-title"
+                style={{
+                  fontFamily: "'Bernard MT Condensed', 'Arial Narrow', sans-serif, system-ui",
+                  letterSpacing: "0.04em",
+                  fontSize: "14px",
+                  fontWeight: 700,
+                  color: "#ffffff",
+                  textTransform: "uppercase",
+                }}
+              >
+                Hospital Metodista
+              </span>
+            )}
           </Link>
           <button
             type="button"
@@ -342,7 +376,7 @@ export const Layout: React.FC = () => {
             <h1 className="lis-topbar-title">{tituloPantalla}</h1>
           </div>
           <div className="lis-topbar-right">
-            <span className="lis-topbar-system-name">LIS Laboratorio Metodista</span>
+            <span className="lis-topbar-system-name">Hospital Metodista · Laboratorio Clínico</span>
           </div>
         </header>
 

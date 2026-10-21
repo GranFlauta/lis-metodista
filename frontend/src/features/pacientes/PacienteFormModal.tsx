@@ -16,6 +16,7 @@ import {
   PacienteUpdatePayload,
 } from "../../api/pacientes";
 import { ApiError } from "../../api/client";
+import { capitalizarNombrePropio } from "../../utils/formatoTexto";
 
 interface PacienteFormModalProps {
   abierto: boolean;
@@ -298,7 +299,7 @@ export const PacienteFormModal: React.FC<PacienteFormModalProps> = ({
                 id="paciente-paterno"
                 type="text"
                 value={apellidoPaterno}
-                onChange={(e) => setApellidoPaterno(e.target.value)}
+                onChange={(e) => setApellidoPaterno(capitalizarNombrePropio(e.target.value, apellidoPaterno))}
                 placeholder="Ej. Morales"
                 maxLength={100}
                 required
@@ -311,7 +312,7 @@ export const PacienteFormModal: React.FC<PacienteFormModalProps> = ({
                 id="paciente-materno"
                 type="text"
                 value={apellidoMaterno}
-                onChange={(e) => setApellidoMaterno(e.target.value)}
+                onChange={(e) => setApellidoMaterno(capitalizarNombrePropio(e.target.value, apellidoMaterno))}
                 placeholder="Ej. Rios"
                 maxLength={100}
               />
@@ -326,7 +327,7 @@ export const PacienteFormModal: React.FC<PacienteFormModalProps> = ({
               id="paciente-nombres"
               type="text"
               value={nombres}
-              onChange={(e) => setNombres(e.target.value)}
+              onChange={(e) => setNombres(capitalizarNombrePropio(e.target.value, nombres))}
               placeholder="Ej. Juan Carlos"
               maxLength={100}
               required

@@ -4,11 +4,11 @@
  */
 
 :root {
-  /* Paleta neutra (grises) + un color de acento azul */
-  --primary: #0284c7;
-  --primary-hover: #0369a1;
-  --primary-focus: rgba(2, 132, 199, 0.35);
-  --primary-light: #e0f2fe;
+  /* Paleta institucional Metodista: Rojo clínico/vino distinguido */
+  --primary: #991b1b;
+  --primary-hover: #7f1d1d;
+  --primary-focus: rgba(153, 27, 27, 0.25);
+  --primary-light: #fef2f2;
 
   --bg-page: #f8fafc;
   --bg-card: #ffffff;
@@ -126,8 +126,8 @@ a:focus-visible {
   font-size: 16px;
   font-weight: 800;
   letter-spacing: 0.05em;
-  color: #38bdf8;
-  background-color: #0369a1;
+  color: #ffffff;
+  background-color: var(--primary);
   padding: 2px 6px;
   border-radius: var(--radius);
 }
@@ -210,13 +210,13 @@ a:focus-visible {
 
 /* Entrada destacada para Nueva orden */
 .lis-sidebar-link-featured {
-  background-color: #0369a1;
+  background-color: var(--primary);
   color: #ffffff !important;
   font-weight: 600;
 }
 
 .lis-sidebar-link-featured:hover {
-  background-color: #0284c7;
+  background-color: var(--primary-hover);
 }
 
 .lis-sidebar-icon {
@@ -748,8 +748,8 @@ a:focus-visible {
 }
 
 .lis-role-bioquimico {
-  background-color: #e0f2fe;
-  color: #0369a1;
+  background-color: var(--primary-light);
+  color: var(--primary);
 }
 
 /* --- Chips de Estudios y Grupos --- */
@@ -772,9 +772,9 @@ a:focus-visible {
 }
 
 .lis-chip-primary {
-  background-color: #e0f2fe;
-  color: #0369a1;
-  border-color: #bae6fd;
+  background-color: var(--primary-light);
+  color: var(--primary);
+  border-color: #fecaca;
 }
 
 /* --- Banderas Analíticas (UX_GUIDE.md §4) --- */
@@ -1370,9 +1370,9 @@ a:focus-visible {
 }
 
 .lis-perfil-btn.active {
-  background-color: #e0f2fe;
+  background-color: var(--primary-light);
   border-color: var(--primary);
-  color: #0369a1;
+  color: var(--primary);
 }
 
 .lis-estudios-switches-grid {
@@ -1566,19 +1566,185 @@ a:focus-visible {
 .lis-captura-hoja {
   flex: 1 1 55%;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 115px);
+  max-height: calc(100vh - 115px);
+  overflow: hidden;
 }
 
-.lis-captura-hoja-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
-  gap: 8px;
-  align-items: start;
+.lis-captura-estudio-scroll-area {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 4px;
 }
 
 .lis-captura-vista-previa {
   flex: 0 0 45%;
   max-width: 45%;
   min-width: 0;
+  height: calc(100vh - 115px);
+  max-height: calc(100vh - 115px);
+  overflow-y: auto;
+  position: sticky;
+  top: 48px;
+}
+
+/* --- Barra de Pestañas / Paginador Inferior de Captura de Resultados (Fija y Estable) --- */
+.lis-captura-paginador-bar {
+  flex-shrink: 0;
+  height: 52px;
+  min-height: 52px;
+  max-height: 52px;
+  background-color: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05);
+  z-index: 15;
+  margin-top: 8px;
+  box-sizing: border-box;
+}
+
+/* Botones de navegación Anterior / Siguiente destacados y llamativos */
+.lis-captura-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background-color: #991b1b;
+  color: #ffffff !important;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 7px 16px;
+  border-radius: var(--radius);
+  border: 1px solid #7f1d1d;
+  cursor: pointer;
+  flex-shrink: 0;
+  box-shadow: 0 2px 4px rgba(153, 27, 27, 0.35);
+  transition: all var(--transition);
+  user-select: none;
+  white-space: nowrap;
+}
+.lis-captura-nav-btn:hover:not(:disabled) {
+  background-color: #7f1d1d;
+  box-shadow: 0 3px 6px rgba(153, 27, 27, 0.45);
+  transform: translateY(-1px);
+}
+.lis-captura-nav-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+.lis-captura-nav-btn:disabled {
+  background-color: #f1f5f9;
+  color: #94a3b8 !important;
+  border-color: #cbd5e1;
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.65;
+  transform: none;
+}
+
+.lis-captura-tabs-scroll {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  white-space: nowrap;
+  flex: 1;
+  padding: 2px 2px;
+  scrollbar-width: thin;
+}
+
+.lis-captura-tabs-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+
+.lis-captura-tabs-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--border-color);
+  border-radius: 4px;
+}
+
+.lis-captura-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all var(--transition);
+  user-select: none;
+  white-space: nowrap;
+  background: transparent;
+}
+
+/* Estudio Asignado y Activo (En visualización) */
+.lis-captura-tab-btn.is-active {
+  background-color: var(--primary);
+  color: #ffffff;
+  border-color: var(--primary);
+  box-shadow: 0 1px 3px rgba(153, 27, 27, 0.3);
+}
+
+/* Estudio Asignado pero Inactivo */
+.lis-captura-tab-btn.is-assigned {
+  background-color: var(--primary-light);
+  color: var(--primary);
+  border-color: #fca5a5;
+}
+.lis-captura-tab-btn.is-assigned:hover {
+  background-color: #fee2e2;
+  border-color: #f87171;
+}
+
+/* Estudio No Asignado (Fuera de la orden) */
+.lis-captura-tab-btn.is-unassigned {
+  background-color: #f8fafc;
+  color: #64748b;
+  border-color: #e2e8f0;
+}
+.lis-captura-tab-btn.is-unassigned:hover {
+  background-color: #f1f5f9;
+  color: #334155;
+  border-color: #cbd5e1;
+}
+
+.lis-captura-tab-btn.is-unassigned.is-preview-active {
+  background-color: #f1f5f9;
+  color: #0f172a;
+  border-color: #94a3b8;
+  font-weight: 700;
+}
+
+/* Tarjeta para estudio no asignado */
+.lis-captura-unassigned-card {
+  background-color: #ffffff;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius);
+  padding: 32px 24px;
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.lis-captura-unassigned-card h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 8px;
+}
+
+.lis-captura-unassigned-card p {
+  font-size: 13.5px;
+  color: var(--text-muted);
+  max-width: 480px;
+  margin: 0 auto 20px auto;
+  line-height: 1.5;
 }
 
 .lis-captura-estudio-box {
@@ -1766,3 +1932,56 @@ a:focus-visible {
   border-bottom: 1px solid #f1f5f9;
   vertical-align: middle;
 }
+
+/* --- Menú Horizontal de Módulos Complementarios (§8) --- */
+.lis-modulos-futuros-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 10px 14px;
+  background-color: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  margin-bottom: 1.25rem;
+  scrollbar-width: thin;
+}
+
+.lis-modulo-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-color);
+  background-color: #f8fafc;
+  cursor: not-allowed;
+  min-width: 150px;
+  transition: all var(--transition);
+  opacity: 0.9;
+  text-align: center;
+}
+
+.lis-modulo-btn:hover {
+  background-color: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.lis-modulo-btn-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lis-modulo-btn-sub {
+  font-size: 11px;
+  font-style: italic;
+  color: #94a3b8;
+  margin-top: 3px;
+  letter-spacing: 0.02em;
+}
+

@@ -21,8 +21,11 @@ import {
   crearOrdenApi,
   EstudioItemCreate,
   OrdenCreatePayload,
+  listarOrdenesApi,
+  OrdenListItem,
 } from "../../api/ordenes";
 import { ApiError } from "../../api/client";
+import { capitalizarNombrePropio } from "../../utils/formatoTexto";
 
 function obtenerFechaHoraActualLocal(): string {
   const d = new Date();
@@ -63,10 +66,16 @@ export const NuevaOrdenPage: React.FC = () => {
   const [pacienteSeleccionado, setPacienteSeleccionado] = useState<PacienteDetalle | null>(null);
   const [edadPacienteSeleccionadoManual, setEdadPacienteSeleccionadoManual] = useState<string>("");
 
-  // Buscador de paciente
+  // Buscador de paciente y lista con scroll (§7)
   const [busqueda, setBusqueda] = useState<string>("");
-  const [resultadosBusqueda, setResultadosBusqueda] = useState<PacienteDetalle[]>([]);
-  const [buscando, setBuscando] = useState<boolean>(false);
+  const [pacientesExistentes, setPacientesExistentes] = useState<PacienteDetalle[]>([]);
+  const [cargandoPacientes, setCargandoPacientes] = useState<boolean>(false);
+
+  // Órdenes recientes del sistema (§7)
+  const [ordenesRecientes, setOrdenesRecientes] = useState<OrdenListItem[]>([]);
+  const [cargandoRecientes, setCargandoRecientes] = useState<boolean>(false);
+  const [filtroRecientesTexto, setFiltroRecientesTexto] = useState<string>("");
+  const [filtroRecientesEstado, setFiltroRecientesEstado] = useState<string>("TODAS");
 
   // Formulario nuevo paciente
   const [nuevoSinCi, setNuevoSinCi] = useState<boolean>(false);
@@ -101,7 +110,46 @@ export const NuevaOrdenPage: React.FC = () => {
 
   const botonEmpezarRef = useRef<HTMLButtonElement | null>(null);
 
-  // 1. Cargar catálogo clínico al montar
+  // Cargar pacientes existentes
+  const cargarPacientesExistentes = async (q = "") => {
+    setCargandoPacientes(true);
+    try {
+      const resp = await listarPacientesApi({ q: q.trim() || undefined, limit: 35 });
+      setPacientesExistentes(resp.items);
+    } catch {
+      setPacientesExistentes([]);
+    } finally {
+      setCargandoPacientes(false);
+    }
+  };
+
+  // Cargar órdenes recientes del sistema
+  const cargarOrdenesRecientes = async () => {
+    setCargandoRecientes(true);
+    try {
+      const resp = await listarOrdenesApi({ limit: 30 });
+      setOrdenesRecientes(resp.items);
+    } catch {
+      setOrdenesRecientes([]);
+    } finally {
+      setCargandoRecientes(false);
+    }
+  };
+
+  // Reiniciar formulario para una nueva orden sin perder sesión (§7)
+  const handleReiniciarFormulario = () => {
+    setPacienteSeleccionado(null);
+    setModoCrearNuevo(false);
+    setEstudiosSeleccionados(new Set());
+    setGruposInmunosero(new Set());
+    setPerfilActivo("");
+    setMedicoSolicitante("");
+    setPieza("");
+    setBusqueda("");
+    setEdadPacienteSeleccionadoManual("");
+  };
+
+  // 1. Cargar catálogo clínico y datos iniciales al montar
   useEffect(() => {
     let montado = true;
     async function cargarCat() {
@@ -124,6 +172,8 @@ export const NuevaOrdenPage: React.FC = () => {
       }
     }
     cargarCat();
+    cargarPacientesExistentes();
+    cargarOrdenesRecientes();
     return () => {
       montado = false;
     };
@@ -151,26 +201,12 @@ export const NuevaOrdenPage: React.FC = () => {
     }
   }, [idPacienteParam]);
 
-  // 3. Debounce para búsqueda única de paciente (300 ms)
+  // 3. Debounce para búsqueda y filtro de pacientes existentes
   useEffect(() => {
     if (modoCrearNuevo || pacienteSeleccionado) return;
-    if (!busqueda.trim()) {
-      setResultadosBusqueda([]);
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      setBuscando(true);
-      try {
-        const resp = await listarPacientesApi({ q: busqueda.trim(), limit: 5 });
-        setResultadosBusqueda(resp.items);
-      } catch {
-        setResultadosBusqueda([]);
-      } finally {
-        setBuscando(false);
-      }
-    }, 300);
-
+    const timer = setTimeout(() => {
+      cargarPacientesExistentes(busqueda);
+    }, 250);
     return () => clearTimeout(timer);
   }, [busqueda, modoCrearNuevo, pacienteSeleccionado]);
 
@@ -411,6 +447,17 @@ export const NuevaOrdenPage: React.FC = () => {
     ? parseInt(nuevoEdadAnios, 10)
     : null;
 
+  const ordenesFiltradas = ordenesRecientes.filter((ord) => {
+    if (filtroRecientesEstado === "PUBLICADA" && ord.estado_trabajo !== "PUBLICADA") return false;
+    if (filtroRecientesEstado === "PENDIENTE" && ord.estado_trabajo === "PUBLICADA") return false;
+    if (!filtroRecientesTexto.trim()) return true;
+    const q = filtroRecientesTexto.toLowerCase();
+    const nombre = `${ord.paciente.nombres} ${ord.paciente.apellido_paterno} ${ord.paciente.apellido_materno || ""}`.toLowerCase();
+    const ci = (ord.paciente.ci || "").toLowerCase();
+    const idStr = String(ord.numero_orden_paciente || ord.id);
+    return nombre.includes(q) || ci.includes(q) || idStr.includes(q);
+  });
+
   return (
     <div className="lis-page-container" style={{ padding: "0 0 24px 0" }}>
       <form onSubmit={handleContinuar} className="lis-nueva-orden-layout">
@@ -506,70 +553,91 @@ export const NuevaOrdenPage: React.FC = () => {
                   )}
                 </div>
               ) : !modoCrearNuevo ? (
-                /* 1B: Buscador único de paciente */
+                /* 1B: Buscador de paciente y lista con scroll (§7) */
                 <div className="lis-paciente-search-wrap">
-                  <label htmlFor="buscador-paciente-input" style={{ fontSize: "12.5px", fontWeight: 600 }}>
-                    Buscar paciente existente
-                  </label>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                    <label htmlFor="buscador-paciente-input" style={{ fontSize: "12.5px", fontWeight: 700 }}>
+                      Buscar paciente existente
+                    </label>
+                    <button
+                      type="button"
+                      className="lis-btn lis-btn-text"
+                      style={{ padding: 0, fontSize: "12px", fontWeight: 700, color: "var(--primary)" }}
+                      onClick={() => {
+                        setModoCrearNuevo(true);
+                        setBusqueda("");
+                      }}
+                    >
+                      + Crear paciente nuevo
+                    </button>
+                  </div>
                   <input
                     id="buscador-paciente-input"
                     type="search"
                     value={busqueda}
                     onChange={(e) => setBusqueda(e.target.value)}
-                    placeholder="CI o apellidos del paciente..."
+                    placeholder="Filtrar por CI o apellidos..."
                     autoComplete="off"
                     autoFocus
-                    style={{ width: "100%" }}
+                    style={{ width: "100%", padding: "5px 8px", fontSize: "13px" }}
                   />
 
-                  {buscando && (
-                    <span className="lis-text-muted" style={{ fontSize: "12px", marginTop: "4px" }}>
-                      Buscando…
-                    </span>
-                  )}
-
-                  {/* Dropdown de resultados */}
-                  {resultadosBusqueda.length > 0 && (
-                    <div className="lis-dropdown-results" role="listbox">
-                      {resultadosBusqueda.map((p) => (
+                  {/* Lista con scroll de pacientes existentes sin romper la ventana (§7) */}
+                  <div
+                    style={{
+                      marginTop: "8px",
+                      maxHeight: "180px",
+                      overflowY: "auto",
+                      border: "1px solid var(--border-color)",
+                      borderRadius: "var(--radius)",
+                      backgroundColor: "#ffffff",
+                    }}
+                  >
+                    {cargandoPacientes ? (
+                      <div style={{ padding: "10px", textAlign: "center", fontSize: "12px", color: "var(--text-muted)" }}>
+                        Cargando pacientes…
+                      </div>
+                    ) : pacientesExistentes.length === 0 ? (
+                      <div style={{ padding: "10px", textAlign: "center", fontSize: "12px", color: "var(--text-muted)" }}>
+                        {busqueda ? "No se encontraron pacientes" : "No hay pacientes disponibles"}
+                      </div>
+                    ) : (
+                      pacientesExistentes.map((p) => (
                         <div
                           key={p.id}
-                          className="lis-dropdown-item"
                           onClick={() => {
                             setPacienteSeleccionado(p);
-                            setResultadosBusqueda([]);
                             setBusqueda("");
                           }}
-                          role="option"
-                          aria-selected="false"
+                          style={{
+                            padding: "6px 10px",
+                            borderBottom: "1px solid var(--border-light)",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            cursor: "pointer",
+                          }}
+                          className="lis-paciente-list-item"
                         >
                           <div>
-                            <strong>
+                            <strong style={{ fontSize: "12.5px", display: "block", color: "var(--text-main)" }}>
                               {p.apellido_paterno} {p.apellido_materno || ""}, {p.nombres}
                             </strong>
-                            <div className="lis-text-muted" style={{ fontSize: "11.5px" }}>
-                              {p.sin_ci ? "Sin CI" : `CI: ${p.ci}`} • {p.sexo}
-                            </div>
+                            <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                              {p.sin_ci ? "Sin CI" : `CI: ${p.ci}`} • {p.sexo === "M" ? "Masc" : "Fem"}
+                              {p.fecha_nacimiento ? ` • ${p.fecha_nacimiento}` : ""}
+                            </span>
                           </div>
-                          <span className="lis-btn lis-btn-secondary lis-btn-sm">Elegir</span>
+                          <button
+                            type="button"
+                            className="lis-btn lis-btn-secondary lis-btn-sm"
+                            style={{ fontSize: "11px", padding: "2px 8px" }}
+                          >
+                            Elegir
+                          </button>
                         </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <div style={{ marginTop: "8px", borderTop: "1px dashed var(--border-light)", paddingTop: "6px" }}>
-                    <button
-                      type="button"
-                      className="lis-btn lis-btn-text"
-                      style={{ padding: 0, fontSize: "13px", fontWeight: 600 }}
-                      onClick={() => {
-                        setModoCrearNuevo(true);
-                        setBusqueda("");
-                        setResultadosBusqueda([]);
-                      }}
-                    >
-                      + Crear paciente nuevo
-                    </button>
+                      ))
+                    )}
                   </div>
                 </div>
               ) : (
@@ -652,7 +720,7 @@ export const NuevaOrdenPage: React.FC = () => {
                       <input
                         type="text"
                         value={nuevoPaterno}
-                        onChange={(e) => setNuevoPaterno(e.target.value)}
+                        onChange={(e) => setNuevoPaterno(capitalizarNombrePropio(e.target.value, nuevoPaterno))}
                         placeholder="Ap. Paterno"
                         required
                         style={{ width: "100%", padding: "4px 8px" }}
@@ -663,7 +731,7 @@ export const NuevaOrdenPage: React.FC = () => {
                       <input
                         type="text"
                         value={nuevoMaterno}
-                        onChange={(e) => setNuevoMaterno(e.target.value)}
+                        onChange={(e) => setNuevoMaterno(capitalizarNombrePropio(e.target.value, nuevoMaterno))}
                         placeholder="Ap. Materno"
                         style={{ width: "100%", padding: "4px 8px" }}
                       />
@@ -675,7 +743,7 @@ export const NuevaOrdenPage: React.FC = () => {
                     <input
                       type="text"
                       value={nuevoNombres}
-                      onChange={(e) => setNuevoNombres(e.target.value)}
+                      onChange={(e) => setNuevoNombres(capitalizarNombrePropio(e.target.value, nuevoNombres))}
                       placeholder="Nombres completos"
                       required
                       style={{ width: "100%", padding: "4px 8px" }}
@@ -747,7 +815,7 @@ export const NuevaOrdenPage: React.FC = () => {
                     id="input-medico"
                     type="text"
                     value={medicoSolicitante}
-                    onChange={(e) => setMedicoSolicitante(e.target.value)}
+                    onChange={(e) => setMedicoSolicitante(capitalizarNombrePropio(e.target.value, medicoSolicitante))}
                     placeholder="Ej. Dr. Mario Torres"
                     maxLength={150}
                     style={{ padding: "6px 10px", fontSize: "13px" }}
@@ -940,6 +1008,139 @@ export const NuevaOrdenPage: React.FC = () => {
           </div>
         </section>
       </form>
+
+      {/* SECCIÓN 4: PANEL DE ÓRDENES RECIENTES DEL SISTEMA (PASO 7) */}
+      <section className="lis-zone-card" style={{ marginTop: "1.5rem" }} aria-label="Órdenes Recientes del Sistema">
+        <div className="lis-zone-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <h2 className="lis-zone-title" style={{ margin: 0, fontSize: "1.05rem" }}>
+              Órdenes Recientes (Publicadas y Pendientes)
+            </h2>
+            <span className="lis-chip">
+              {ordenesRecientes.length} registradas
+            </span>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+            <input
+              type="search"
+              placeholder="Buscar paciente, CI o #orden..."
+              value={filtroRecientesTexto}
+              onChange={(e) => setFiltroRecientesTexto(e.target.value)}
+              style={{ padding: "4px 8px", fontSize: "12.5px", width: "200px" }}
+            />
+            <select
+              value={filtroRecientesEstado}
+              onChange={(e) => setFiltroRecientesEstado(e.target.value)}
+              style={{ padding: "4px 8px", fontSize: "12.5px" }}
+            >
+              <option value="TODAS">Todos los estados</option>
+              <option value="PUBLICADA">Publicadas (Informes)</option>
+              <option value="PENDIENTE">Pendientes de captura</option>
+            </select>
+            <button
+              type="button"
+              className="lis-btn lis-btn-secondary lis-btn-sm"
+              onClick={handleReiniciarFormulario}
+              title="Reiniciar campos de la orden actual sin perder sesión"
+            >
+              + Nueva orden
+            </button>
+          </div>
+        </div>
+
+        <div className="lis-zone-content" style={{ padding: "10px" }}>
+          {cargandoRecientes ? (
+            <div style={{ padding: "16px", textAlign: "center", color: "var(--text-muted)" }}>
+              Cargando órdenes recientes…
+            </div>
+          ) : ordenesFiltradas.length === 0 ? (
+            <div style={{ padding: "16px", textAlign: "center", color: "var(--text-muted)", fontSize: "13px" }}>
+              No se encontraron órdenes recientes con los filtros aplicados.
+            </div>
+          ) : (
+            <div className="lis-table-responsive" style={{ maxHeight: "280px", overflowY: "auto" }}>
+              <table className="lis-table lis-table-dense">
+                <thead>
+                  <tr>
+                    <th>Orden</th>
+                    <th>Paciente</th>
+                    <th>Estudios</th>
+                    <th>Estado</th>
+                    <th>Fecha</th>
+                    <th className="lis-text-right">Acción</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ordenesFiltradas.map((ord) => {
+                    const esPublicada = ord.estado_trabajo === "PUBLICADA";
+                    return (
+                      <tr key={ord.id}>
+                        <td>
+                          <strong>#{ord.numero_orden_paciente || ord.id}</strong>
+                        </td>
+                        <td>
+                          <span style={{ fontWeight: 600 }}>
+                            {ord.paciente.apellido_paterno} {ord.paciente.apellido_materno || ""},{" "}
+                            {ord.paciente.nombres}
+                          </span>
+                          <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>
+                            {ord.paciente.ci ? `CI: ${ord.paciente.ci}` : "Sin CI"}
+                          </span>
+                        </td>
+                        <td>
+                          <span style={{ fontSize: "12px" }}>
+                            {ord.estudios_detalle?.map((e) => e.nombre).join(", ") ||
+                              ord.estudios?.join(", ")}
+                          </span>
+                        </td>
+                        <td>
+                          <span
+                            className={`lis-status-badge ${
+                              esPublicada
+                                ? "lis-status-publicada"
+                                : ord.estado_trabajo === "COMPLETO"
+                                ? "lis-status-completo"
+                                : "lis-status-incompleto"
+                            }`}
+                            style={{ fontSize: "11px" }}
+                          >
+                            {ord.estado_trabajo}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                          {ord.fecha_solicitud}
+                        </td>
+                        <td className="lis-text-right">
+                          {esPublicada ? (
+                            <Link
+                              to={`/ordenes/${ord.id}`}
+                              className="lis-btn lis-btn-outline lis-btn-sm"
+                              style={{ fontSize: "11.5px", padding: "2px 8px" }}
+                              title="Ver informe completo e imprimir"
+                            >
+                              Ver informe / Imprimir
+                            </Link>
+                          ) : (
+                            <Link
+                              to={`/ordenes/${ord.id}/captura`}
+                              className="lis-btn lis-btn-primary lis-btn-sm"
+                              style={{ fontSize: "11.5px", padding: "2px 8px" }}
+                              title="Ir a captura de resultados"
+                            >
+                              Capturar resultados →
+                            </Link>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
 
       {/* VENTANA MODAL DE CONFIRMACIÓN (§6.4) */}
       {modalAbierto && (

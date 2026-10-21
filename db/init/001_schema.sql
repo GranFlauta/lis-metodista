@@ -457,7 +457,7 @@ CREATE TABLE laboratorio_config (
     actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 INSERT INTO laboratorio_config (clave, valor) VALUES
-    ('nombre_laboratorio', 'LABORATORIO CLINICO URGENLAB'),
+    ('nombre_laboratorio', 'LABORATORIO CLINICO METODISTA'),
     ('ruc',                ''),            -- completar
     ('telefono',           ''),            -- completar
     ('horario_atencion',   ''),            -- completar
