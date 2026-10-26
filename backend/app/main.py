@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 from fastapi import FastAPI
 
-from app.api import auth, catalogo, ordenes, pacientes, resultados, usuarios
+from app.api import auth, catalogo, informes, ordenes, pacientes, resultados, usuarios
 from app.core.config import es_modo_demo, settings
 from app.core.errors import register_error_handlers
 
@@ -50,6 +50,7 @@ app.include_router(catalogo.router)
 app.include_router(pacientes.router)
 app.include_router(ordenes.router)
 app.include_router(resultados.router)
+app.include_router(informes.router)
 
 if modo_demo_activo:
     from fastapi.responses import FileResponse, JSONResponse

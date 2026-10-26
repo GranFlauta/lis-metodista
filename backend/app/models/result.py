@@ -30,6 +30,10 @@ class ResultadoBorrador(Base):
     es_calculado = Column(Boolean, nullable=False, default=False)
     calculable = Column(Boolean, nullable=False, default=True)
     confirmado = Column(Boolean, nullable=False, default=True)
+    ref_inferior_override = Column(Numeric(20, 6), nullable=True)
+    ref_superior_override = Column(Numeric(20, 6), nullable=True)
+    ref_texto_override = Column(Text, nullable=True)
+    ref_modificada = Column(Boolean, nullable=False, default=False)
     actualizado_por = Column(BigInteger, ForeignKey("laboratorio.usuarios.id_usuario"), nullable=False)
     actualizado_en = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

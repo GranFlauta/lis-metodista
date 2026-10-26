@@ -19,6 +19,9 @@ import { OrdenesPage } from "./features/ordenes/OrdenesPage";
 import { NuevaOrdenPage } from "./features/ordenes/NuevaOrdenPage";
 import { OrdenDetallePage } from "./features/ordenes/OrdenDetallePage";
 import { CapturaResultadosPage } from "./features/ordenes/CapturaResultadosPage";
+import { InformesPage } from "./features/informes/InformesPage";
+import { InformeDetallePage } from "./features/informes/InformeDetallePage";
+import { PapeleraPage } from "./features/informes/PapeleraPage";
 import { Layout } from "./components/Layout";
 import "./index.css";
 
@@ -63,6 +66,9 @@ export default function App() {
             />
             <Route path="ordenes/:id" element={<OrdenDetallePage />} />
             <Route path="ordenes/:id/captura" element={<CapturaResultadosPage />} />
+            <Route path="informes" element={<InformesPage />} />
+            <Route path="informes/:folio" element={<InformeDetallePage />} />
+            <Route path="papelera" element={<PapeleraPage />} />
             <Route
               path="admin/usuarios"
               element={

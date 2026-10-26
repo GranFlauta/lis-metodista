@@ -18,7 +18,7 @@ RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ / "backend"))
 
 from app.core.database import SessionLocal
-from app.core.security import hash_password
+from app.core.security import get_password_hash
 from app.models.user import Rol, Usuario
 
 
@@ -63,7 +63,7 @@ def main() -> None:
             print("Error: El rol ADMIN no existe en la base de datos.", file=sys.stderr)
             sys.exit(1)
 
-        pass_hash = hash_password(password)
+        pass_hash = get_password_hash(password)
 
         # Verificar si el usuario ya existe para actualizarlo
         usuario_db = db.query(Usuario).filter(Usuario.usuario == usuario.lower().strip()).first()

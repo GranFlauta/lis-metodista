@@ -144,14 +144,13 @@ export const OrdenesPage: React.FC = () => {
 
   return (
     <div className="lis-page-container">
-      {/* Cabecera */}
-      <div className="lis-page-header">
+      {/* Cabecera y Acciones */}
+      <div className="lis-page-header" style={{ marginBottom: "1rem" }}>
         <div>
-          <h2>Órdenes y Pendientes</h2>
-          <p className="lis-page-sub">
+          <p className="lis-page-sub" style={{ margin: 0, fontSize: "13.5px" }}>
             {esAdmin
               ? "Supervisión de órdenes clínicas (Acceso auditado ADMIN_VE_PRIVADO)."
-              : "Control de órdenes analíticas, estado de avance y captura de resultados."}
+              : "Control de órdenes analíticas, estado de avance y captura de resultados clínicos."}
           </p>
         </div>
 

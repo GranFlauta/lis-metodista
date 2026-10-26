@@ -46,6 +46,82 @@
   --sidebar-w-collapsed: 56px;
 }
 
+/* Modo Oscuro Global para protección visual nocturna */
+[data-theme="dark"] {
+  --bg-page: #0b0f19;
+  --bg-card: #111827;
+  --text-main: #f3f4f6;
+  --text-muted: #9ca3af;
+  --border-color: #1f293d;
+  --border-light: #1e293b;
+
+  --primary: #dc2626;
+  --primary-hover: #b91c1c;
+  --primary-focus: rgba(220, 38, 38, 0.35);
+  --primary-light: #450a0a;
+
+  --flag-alto-bg: #450a0a;
+  --flag-alto-text: #fca5a5;
+  --flag-bajo-bg: #172554;
+  --flag-bajo-text: #93c5fd;
+  --flag-normal-bg: #052e16;
+  --flag-normal-text: #86efac;
+  --flag-unconfirmed-bg: #451a03;
+  --flag-unconfirmed-text: #fde047;
+
+  --success: #22c55e;
+  --success-bg: #052e16;
+  --warning: #f59e0b;
+  --warning-bg: #451a03;
+  --error: #ef4444;
+  --error-bg: #450a0a;
+}
+
+[data-theme="dark"] .lis-table-card,
+[data-theme="dark"] .lis-zone-card,
+[data-theme="dark"] .lis-cabecera-card,
+[data-theme="dark"] .lis-modal-card {
+  background-color: #111827;
+  border-color: #1f293d;
+  color: #f3f4f6;
+}
+
+[data-theme="dark"] .lis-topbar {
+  background-color: #0b0f19;
+  border-bottom-color: #1f293d;
+  color: #f3f4f6;
+}
+
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea,
+[data-theme="dark"] .lis-captura-input {
+  background-color: #1e293b;
+  border-color: #334155;
+  color: #f3f4f6;
+}
+
+[data-theme="dark"] table th {
+  background-color: #1e293b;
+  color: #94a3b8;
+  border-color: #334155;
+}
+
+[data-theme="dark"] table td {
+  border-color: #1f293d;
+  color: #f3f4f6;
+}
+
+[data-theme="dark"] .lis-btn-secondary {
+  background-color: #1e293b;
+  border-color: #334155;
+  color: #f3f4f6;
+}
+
+[data-theme="dark"] .lis-btn-secondary:hover {
+  background-color: #334155;
+}
+
 /* --- Reseteo base --- */
 * {
   box-sizing: border-box;
@@ -85,13 +161,13 @@ a:focus-visible {
 .lis-sidebar {
   display: flex;
   flex-direction: column;
-  background-color: #0f172a;
+  background-color: #000000;
   color: #94a3b8;
   height: 100vh;
   flex-shrink: 0;
   transition: width var(--transition);
   z-index: 50;
-  border-right: 1px solid #1e293b;
+  border-right: 1px solid #18181b;
   user-select: none;
 }
 
@@ -109,7 +185,7 @@ a:focus-visible {
   align-items: center;
   justify-content: space-between;
   padding: 0 12px;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid #18181b;
 }
 
 .lis-sidebar-brand {
@@ -2177,5 +2253,299 @@ a:focus-visible {
   color: #94a3b8;
   margin-top: 3px;
   letter-spacing: 0.02em;
+}
+
+/* --- Estilos de Informe Oficial e Impresión (Fase 4) --- */
+.lis-informe-view {
+  background-color: #cbd5e1;
+  padding: 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.lis-informe-actions-bar {
+  width: 100%;
+  max-width: 840px;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.lis-informe-hoja {
+  width: 100%;
+  max-width: 840px;
+  background-color: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 32px 36px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  color: #0f172a;
+}
+
+.lis-informe-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Reglas de Impresión (@media print) */
+@media print {
+  @page {
+    size: letter portrait;
+    margin: 12mm 10mm 12mm 10mm;
+  }
+
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    font-size: 11pt !important;
+  }
+
+  .lis-sidebar,
+  .lis-topbar,
+  .lis-no-print,
+  .lis-informe-actions-bar,
+  .lis-modal-overlay {
+    display: none !important;
+  }
+
+  .lis-app-container,
+  .lis-page-container,
+  .lis-informe-view {
+    height: auto !important;
+    width: 100% !important;
+    overflow: visible !important;
+    background: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: block !important;
+  }
+
+  .lis-informe-hoja {
+    max-width: 100% !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  table {
+    page-break-inside: auto;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tfoot {
+    display: table-footer-group;
+  }
+}
+
+/* --- Cabecera fija y notificaciones fijas del estudio enfocado --- */
+.lis-captura-sticky-header-group {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background-color: var(--bg-card);
+  border-bottom: 2px solid var(--border-light);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+/* --- Hoja y Simulador de PDF tamaño Carta (21,6 × 27,9 cm) --- */
+.lis-hoja-carta {
+  width: 216mm;
+  min-height: 279mm;
+  max-width: 100%;
+  background-color: #ffffff;
+  color: #0f172a;
+  border-radius: 2px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  padding: 16mm 14mm;
+  box-sizing: border-box;
+  margin: 0 auto;
+}
+
+.lis-hoja-carta.is-pdf-mode {
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65);
+}
+
+.lis-preview-lab-header {
+  text-align: center;
+  border-bottom: 2px solid #991b1b;
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+}
+
+.lis-preview-lab-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: #991b1b;
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.lis-preview-lab-sub {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.lis-preview-patient-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px 12px;
+  padding: 8px 12px;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+.lis-preview-study-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.lis-preview-study-table th {
+  background-color: #f1f5f9;
+  color: #475569;
+  padding: 4px 8px;
+  border-bottom: 1.5px solid #cbd5e1;
+  font-size: 11.5px;
+  text-align: left;
+}
+
+.lis-preview-study-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+/* Simulador de visor PDF a pantalla completa con fondo negro */
+.lis-pdf-simulator-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background-color: #0b0f19;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.lis-pdf-toolbar {
+  height: 48px;
+  background-color: #000000;
+  border-bottom: 1px solid #1f293d;
+  color: #f3f4f6;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.lis-pdf-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.lis-pdf-toolbar-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #f3f4f6;
+}
+
+.lis-pdf-toolbar-center {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: #111827;
+  padding: 3px 8px;
+  border-radius: var(--radius);
+  border: 1px solid #1f293d;
+}
+
+.lis-pdf-zoom-text {
+  font-size: 12.5px;
+  font-weight: 700;
+  min-width: 46px;
+  text-align: center;
+  color: #ffffff;
+}
+
+.lis-pdf-tool-btn {
+  background: transparent;
+  border: 1px solid #374151;
+  color: #d1d5db;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.lis-pdf-tool-btn:hover {
+  background-color: #1f2937;
+  color: #ffffff;
+  border-color: #4b5563;
+}
+
+.lis-pdf-print-btn {
+  background-color: #2563eb;
+  border-color: #1d4ed8;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.lis-pdf-print-btn:hover {
+  background-color: #1d4ed8;
+}
+
+.lis-pdf-close-btn {
+  background-color: #374151;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.lis-pdf-close-btn:hover {
+  background-color: #dc2626;
+  border-color: #b91c1c;
+}
+
+.lis-pdf-scroll-area {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: auto;
+  padding: 32px 24px;
+  display: flex;
+  justify-content: center;
+  background-color: #0b0f19;
+}
+
+.lis-pdf-document-wrapper {
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
 

@@ -192,6 +192,10 @@ class IntegrationTestCase(unittest.TestCase):
 
         # Limpiar datos transaccionales entre pruebas en orden estricto de dependencias
         self.db.execute(text("SET session_replication_role = 'replica'"))
+        self.db.execute(text("DELETE FROM laboratorio.informe_eventos"))
+        self.db.execute(text("DELETE FROM laboratorio.ediciones_informe"))
+        self.db.execute(text("DELETE FROM laboratorio.colaboracion_cambios"))
+        self.db.execute(text("DELETE FROM laboratorio.delegaciones"))
         self.db.execute(text("DELETE FROM laboratorio.informes"))
         self.db.execute(text("DELETE FROM laboratorio.folios"))
         self.db.execute(text("SET session_replication_role = 'origin'"))

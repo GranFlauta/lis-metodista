@@ -86,9 +86,25 @@ class PacienteListaItem(BaseModel):
 class EstudioItemResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    id_orden_estudio: Optional[int] = None
+    id_estudio: Optional[int] = None
     codigo: str
     nombre: str
     grupos: Optional[list[str]] = None
+    observaciones: Optional[str] = None
+
+
+class OrdenEstudioAddRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    codigo: str
+    grupos: Optional[list[str]] = None
+
+
+class OrdenEstudioGruposUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    grupos: list[str]
 
 
 class AdvertenciaSolapamiento(BaseModel):
@@ -117,6 +133,7 @@ class OrdenResponse(BaseModel):
     estado_trabajo: str
     bloqueada: bool
     fila_version: int
+    observaciones: Optional[str] = None
     estudios: list[EstudioItemResponse]
     creado_en: datetime
     actualizado_en: datetime

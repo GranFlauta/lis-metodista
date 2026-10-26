@@ -116,7 +116,11 @@ def calcular_vista_previa(
             raise ValidacionError(f"No se permite modificar el parámetro calculado '{cod}'.")
         normalizar_y_validar_valor_entrada(p, val)
 
-    return evaluar_captura_orden(orden, valores_simulados=payload.valores)
+    return evaluar_captura_orden(
+        orden,
+        valores_simulados=payload.valores,
+        overrides_simulados=payload.rangos_override,
+    )
 
 
 @router.put(
@@ -146,7 +150,15 @@ def actualizar_resultados(
     if orden.bloqueada or orden.estado_trabajo not in ("INCOMPLETO", "COMPLETO"):
         raise ConflictoError("La orden se encuentra bloqueada o publicada y no permite modificaciones.")
 
-    return guardar_resultados_orden(db, orden, payload.valores, current_user)
+    return guardar_resultados_orden(
+        db,
+        orden,
+        payload.valores,
+        current_user,
+        rangos_override=payload.rangos_override,
+        observaciones_estudios=payload.observaciones_estudios,
+        observaciones_orden=payload.observaciones_orden,
+    )
 
 
 @router.post(

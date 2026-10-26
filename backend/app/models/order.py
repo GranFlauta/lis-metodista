@@ -12,6 +12,7 @@ from sqlalchemy import (
     Integer,
     SmallInteger,
     String,
+    Text,
     func,
 )
 from sqlalchemy.orm import relationship
@@ -39,6 +40,7 @@ class Orden(Base):
     bloqueada_por_informe = Column(BigInteger)
     bloqueada_en = Column(DateTime(timezone=True))
     fila_version = Column(Integer, nullable=False, default=1)
+    observaciones = Column(Text)
     creado_en = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     actualizado_en = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -55,6 +57,7 @@ class OrdenEstudio(Base):
     id_orden = Column(BigInteger, ForeignKey("ordenes.id_orden", ondelete="CASCADE"), nullable=False)
     id_estudio = Column(BigInteger, ForeignKey("estudios.id_estudio"), nullable=False)
     id_estudio_version = Column(BigInteger, ForeignKey("estudio_versiones.id_estudio_version"), nullable=False)
+    observaciones = Column(Text)
 
     orden = relationship("Orden", back_populates="estudios")
     estudio = relationship("Estudio")

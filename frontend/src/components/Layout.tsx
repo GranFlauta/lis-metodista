@@ -65,6 +65,22 @@ const IconSliders = () => (
   </svg>
 );
 
+const IconFileText = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <line x1="16" y1="13" x2="8" y2="13" />
+    <line x1="16" y1="17" x2="8" y2="17" />
+  </svg>
+);
+
+const IconTrash = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <polyline points="3 6 5 6 21 6" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+  </svg>
+);
+
 const IconMenu = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <line x1="3" y1="12" x2="21" y2="12" />
@@ -95,6 +111,9 @@ function obtenerTituloPantalla(pathname: string): string {
   if (pathname === "/ordenes") return "Órdenes y Pendientes";
   if (pathname.startsWith("/pacientes/") && pathname !== "/pacientes") return "Ficha de paciente";
   if (pathname === "/pacientes") return "Pacientes";
+  if (pathname === "/informes") return "Informes Oficiales";
+  if (pathname.startsWith("/informes/")) return "Detalle de Informe Oficial";
+  if (pathname === "/papelera") return "Papelera y Reciclaje";
   if (pathname === "/admin/usuarios") return "Administración de usuarios";
   if (pathname === "/admin/configuracion") return "Configuración de sesión";
   if (pathname === "/cambiar-password") return "Cambiar contraseña";
@@ -106,10 +125,36 @@ export const Layout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Estado del menú desplegable en memoria (sin storage, D36-04)
-  const [sidebarExpandido, setSidebarExpandido] = useState<boolean>(() => {
+  // Estado del menú desplegable: fijado + hover dinámico
+  const [sidebarFijado, setSidebarFijado] = useState<boolean>(() => {
     return typeof window !== "undefined" && window.innerWidth >= 1280;
   });
+  const [sidebarHover, setSidebarHover] = useState<boolean>(false);
+  const sidebarExpandido = sidebarFijado || sidebarHover;
+
+  // Tema visual (Claro / Oscuro)
+  const [temaOscuro, setTemaOscuro] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      const guardado = localStorage.getItem("lis_tema");
+      if (guardado) return guardado === "dark";
+      return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (temaOscuro) {
+      document.documentElement.setAttribute("data-theme", "dark");
+      localStorage.setItem("lis_tema", "dark");
+    } else {
+      document.documentElement.setAttribute("data-theme", "light");
+      localStorage.setItem("lis_tema", "light");
+    }
+  }, [temaOscuro]);
+
+  const toggleTema = () => {
+    setTemaOscuro((prev) => !prev);
+  };
 
   const [pendientesCount, setPendientesCount] = useState<number | null>(null);
 
@@ -143,17 +188,19 @@ export const Layout: React.FC = () => {
   };
 
   const toggleSidebar = () => {
-    setSidebarExpandido((prev) => !prev);
+    setSidebarFijado((prev) => !prev);
   };
 
   const tituloPantalla = obtenerTituloPantalla(location.pathname);
 
   return (
     <div className="lis-app-container">
-      {/* Menú lateral izquierdo desplegable */}
+      {/* Menú lateral izquierdo desplegable con soporte de despliegue al pasar el cursor */}
       <aside
         className={`lis-sidebar ${sidebarExpandido ? "lis-sidebar-expanded" : "lis-sidebar-collapsed"}`}
         aria-label="Menú principal"
+        onMouseEnter={() => setSidebarHover(true)}
+        onMouseLeave={() => setSidebarHover(false)}
       >
         <div className="lis-sidebar-header">
           <Link to="/" className="lis-sidebar-brand" title="Hospital Metodista - Laboratorio Clínico">
@@ -268,6 +315,28 @@ export const Layout: React.FC = () => {
                   <span className="lis-sidebar-badge-dot" title={`${pendientesCount} pendientes`} />
                 )}
               </NavLink>
+
+              <NavLink
+                to="/informes"
+                className={({ isActive }) => `lis-sidebar-link ${isActive ? "active" : ""}`}
+                title="Informes oficiales"
+              >
+                <span className="lis-sidebar-icon">
+                  <IconFileText />
+                </span>
+                {sidebarExpandido && <span className="lis-sidebar-text">Informes</span>}
+              </NavLink>
+
+              <NavLink
+                to="/papelera"
+                className={({ isActive }) => `lis-sidebar-link ${isActive ? "active" : ""}`}
+                title="Papelera y reciclaje"
+              >
+                <span className="lis-sidebar-icon">
+                  <IconTrash />
+                </span>
+                {sidebarExpandido && <span className="lis-sidebar-text">Papelera</span>}
+              </NavLink>
             </>
           )}
 
@@ -294,6 +363,28 @@ export const Layout: React.FC = () => {
                   <IconClipboardList />
                 </span>
                 {sidebarExpandido && <span className="lis-sidebar-text">Órdenes</span>}
+              </NavLink>
+
+              <NavLink
+                to="/informes"
+                className={({ isActive }) => `lis-sidebar-link ${isActive ? "active" : ""}`}
+                title="Informes oficiales"
+              >
+                <span className="lis-sidebar-icon">
+                  <IconFileText />
+                </span>
+                {sidebarExpandido && <span className="lis-sidebar-text">Informes</span>}
+              </NavLink>
+
+              <NavLink
+                to="/papelera"
+                className={({ isActive }) => `lis-sidebar-link ${isActive ? "active" : ""}`}
+                title="Papelera y reciclaje"
+              >
+                <span className="lis-sidebar-icon">
+                  <IconTrash />
+                </span>
+                {sidebarExpandido && <span className="lis-sidebar-text">Papelera</span>}
               </NavLink>
 
               <div className="lis-sidebar-section-divider" />
@@ -375,7 +466,30 @@ export const Layout: React.FC = () => {
           <div className="lis-topbar-left">
             <h1 className="lis-topbar-title">{tituloPantalla}</h1>
           </div>
-          <div className="lis-topbar-right">
+          <div className="lis-topbar-right" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <button
+              type="button"
+              className="lis-theme-toggle-btn"
+              onClick={toggleTema}
+              title={temaOscuro ? "Cambiar a Modo Claro" : "Cambiar a Modo Oscuro para descanso visual"}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "4px 10px",
+                fontSize: "12px",
+                fontWeight: 600,
+                borderRadius: "var(--radius)",
+                border: "1px solid var(--border-color)",
+                backgroundColor: "var(--bg-card)",
+                color: "var(--text-main)",
+                cursor: "pointer",
+                transition: "all var(--transition)",
+              }}
+            >
+              <span>{temaOscuro ? "☀️" : "🌙"}</span>
+              <span>{temaOscuro ? "Modo Claro" : "Modo Oscuro"}</span>
+            </button>
             <span className="lis-topbar-system-name">Hospital Metodista · Laboratorio Clínico</span>
           </div>
         </header>

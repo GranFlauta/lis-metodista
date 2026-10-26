@@ -58,6 +58,8 @@ from app.schemas.orden import (
     OrdenCreate,
     OrdenCreadaResponse,
     OrdenesResumenResponse,
+    OrdenEstudioAddRequest,
+    OrdenEstudioGruposUpdateRequest,
     OrdenListItem,
     OrdenListaResponse,
     OrdenResponse,
@@ -66,6 +68,7 @@ from app.schemas.orden import (
     PacienteResumenOrden,
     PerfilResumen,
 )
+from app.schemas.informe import PublicarOrdenRequest
 
 router = APIRouter(prefix="/api/ordenes", tags=["Órdenes"])
 
@@ -118,9 +121,12 @@ def serializar_orden(orden: Orden) -> OrdenResponse:
         )
         estudios_resp.append(
             EstudioItemResponse(
+                id_orden_estudio=oe.id_orden_estudio,
+                id_estudio=oe.id_estudio,
                 codigo=oe.estudio.codigo,
                 nombre=oe.estudio.nombre,
                 grupos=grupos_list,
+                observaciones=oe.observaciones,
             )
         )
 
@@ -140,6 +146,7 @@ def serializar_orden(orden: Orden) -> OrdenResponse:
         estado_trabajo=orden.estado_trabajo,
         bloqueada=orden.bloqueada,
         fila_version=orden.fila_version,
+        observaciones=orden.observaciones,
         estudios=estudios_resp,
         creado_en=orden.creado_en,
         actualizado_en=orden.actualizado_en,
@@ -780,3 +787,217 @@ def descartar_orden(
     db.commit()
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{id}/estudios", response_model=OrdenResponse)
+def agregar_estudio_a_orden(
+    id: int,
+    body: OrdenEstudioAddRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(require_auth),
+) -> OrdenResponse:
+    """
+    Agrega un estudio a una orden en borrador.
+    Si es Inmunoserología, registra los grupos/subestudios seleccionados.
+    """
+    es_admin = current_user.rol and current_user.rol.nombre == "ADMIN"
+    if es_admin:
+        raise ProhibidoError("El administrador no puede modificar estudios de una orden.")
+
+    orden = db.query(Orden).filter(Orden.id_orden == id).first()
+    if not orden or orden.id_usuario_autor != current_user.id_usuario:
+        raise NoEncontradoError(f"Orden con id {id} no encontrada.")
+
+    if orden.bloqueada or orden.estado_trabajo == "PUBLICADA":
+        raise ConflictoError("No se pueden añadir estudios a una orden bloqueada o publicada.")
+
+    codigo_limpio = body.codigo.strip().upper()
+    est = db.query(Estudio).filter(func.upper(Estudio.codigo) == codigo_limpio, Estudio.activo == True).first()
+    if not est:
+        raise ValidacionError(f"El estudio '{body.codigo}' no existe o está inactivo.")
+
+    # Verificar si ya forma parte de la orden
+    ya_existe = any(oe.id_estudio == est.id_estudio for oe in orden.estudios)
+    if ya_existe:
+        raise ConflictoError(f"El estudio '{est.nombre}' ya está incluido en la orden.")
+
+    ver = (
+        db.query(EstudioVersion)
+        .filter(EstudioVersion.id_estudio == est.id_estudio, EstudioVersion.activa == True)
+        .first()
+    )
+    if not ver:
+        raise ValidacionError(f"El estudio '{est.nombre}' no tiene versión de catálogo activa.")
+
+    oe = OrdenEstudio(
+        id_orden=orden.id_orden,
+        id_estudio=est.id_estudio,
+        id_estudio_version=ver.id_estudio_version,
+    )
+    db.add(oe)
+    db.flush()
+
+    if est.seleccion_parcial:
+        if not body.grupos or len(body.grupos) == 0:
+            raise ValidacionError(f"El estudio '{est.nombre}' requiere seleccionar al menos un subestudio.")
+        for g in body.grupos:
+            g_clean = g.strip()
+            if g_clean:
+                db.add(OrdenEstudioGrupo(id_orden_estudio=oe.id_orden_estudio, grupo=g_clean))
+
+    orden.actualizado_en = ahora()
+    db.commit()
+    db.refresh(orden)
+
+    return serializar_orden(orden)
+
+
+@router.put("/{id}/estudios/{id_estudio}/grupos", response_model=OrdenResponse)
+def actualizar_grupos_estudio_orden(
+    id: int,
+    id_estudio: int,
+    body: OrdenEstudioGruposUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(require_auth),
+) -> OrdenResponse:
+    """
+    Actualiza los subestudios/grupos de un estudio con selección parcial (ej: Inmunoserología).
+    """
+    es_admin = current_user.rol and current_user.rol.nombre == "ADMIN"
+    if es_admin:
+        raise ProhibidoError("El administrador no puede modificar estudios de una orden.")
+
+    orden = db.query(Orden).filter(Orden.id_orden == id).first()
+    if not orden or orden.id_usuario_autor != current_user.id_usuario:
+        raise NoEncontradoError(f"Orden con id {id} no encontrada.")
+
+    if orden.bloqueada or orden.estado_trabajo == "PUBLICADA":
+        raise ConflictoError("No se pueden modificar estudios de una orden bloqueada o publicada.")
+
+    oe = (
+        db.query(OrdenEstudio)
+        .filter(OrdenEstudio.id_orden == id, OrdenEstudio.id_estudio == id_estudio)
+        .first()
+    )
+    if not oe:
+        raise NoEncontradoError(f"El estudio con id {id_estudio} no forma parte de esta orden.")
+
+    if not oe.estudio.seleccion_parcial:
+        raise ValidacionError("Solo los estudios de selección parcial permiten modificar subestudios.")
+
+    grupos_nuevos = [g.strip() for g in body.grupos if g.strip()]
+    if not grupos_nuevos:
+        raise ValidacionError("Debe seleccionar al menos un subestudio.")
+
+    # Reemplazar grupos
+    db.query(OrdenEstudioGrupo).filter(OrdenEstudioGrupo.id_orden_estudio == oe.id_orden_estudio).delete(synchronize_session=False)
+    for g in grupos_nuevos:
+        db.add(OrdenEstudioGrupo(id_orden_estudio=oe.id_orden_estudio, grupo=g))
+
+    orden.actualizado_en = ahora()
+    db.commit()
+    db.refresh(orden)
+
+    return serializar_orden(orden)
+
+
+@router.delete("/{id}/estudios/{id_estudio}")
+def eliminar_estudio_de_orden(
+    id: int,
+    id_estudio: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(require_auth),
+) -> dict[str, Any]:
+    """
+    Elimina un estudio de la orden en borrador.
+    Si se elimina el último estudio, la orden se descarta/cancela automáticamente.
+    """
+    es_admin = current_user.rol and current_user.rol.nombre == "ADMIN"
+    if es_admin:
+        raise ProhibidoError("El administrador no puede eliminar estudios de una orden.")
+
+    orden = db.query(Orden).filter(Orden.id_orden == id).first()
+    if not orden or orden.id_usuario_autor != current_user.id_usuario:
+        raise NoEncontradoError(f"Orden con id {id} no encontrada.")
+
+    if orden.bloqueada or orden.estado_trabajo == "PUBLICADA":
+        raise ConflictoError("No se pueden eliminar estudios de una orden bloqueada o publicada.")
+
+    oe = (
+        db.query(OrdenEstudio)
+        .filter(OrdenEstudio.id_orden == id, OrdenEstudio.id_estudio == id_estudio)
+        .first()
+    )
+    if not oe:
+        raise NoEncontradoError(f"El estudio con id {id_estudio} no pertenece a esta orden.")
+
+    db.delete(oe)
+    db.flush()
+
+    # Comprobar cuántos estudios quedan en la orden
+    restantes = db.query(OrdenEstudio).filter(OrdenEstudio.id_orden == id).count()
+
+    if restantes == 0:
+        # Cancelar y descartar la orden de forma irreversible
+        now = ahora()
+        descarte = BorradorDescartado(
+            id_orden=orden.id_orden,
+            id_paciente=orden.id_paciente,
+            id_usuario=current_user.id_usuario,
+            estado_trabajo=orden.estado_trabajo,
+            estaba_bloqueada=orden.bloqueada,
+            folio_causa=None,
+            descartado_en=now,
+        )
+        db.add(descarte)
+        db.delete(orden)
+        db.commit()
+
+        return {
+            "orden_cancelada": True,
+            "orden_descartada": True,
+            "mensaje": "La orden no tiene estudios a realizar. Ha sido cancelada y descartada de forma irreversible; debe crear una nueva orden.",
+            "orden": None,
+        }
+
+    orden.actualizado_en = ahora()
+    db.commit()
+    db.refresh(orden)
+
+    return {
+        "orden_cancelada": False,
+        "orden_descartada": False,
+        "mensaje": "Estudio eliminado exitosamente de la orden.",
+        "orden": serializar_orden(orden).model_dump(mode="json"),
+    }
+
+
+@router.post("/{id}/publicar", status_code=status.HTTP_201_CREATED)
+def publicar_orden_endpoint(
+    id: int,
+    body: Optional[PublicarOrdenRequest] = None,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(require_auth),
+) -> dict[str, Any]:
+    """
+    Publica la orden con folio oficial inmutable, congelamiento en snapshot SHA-256
+    y registro en informe_eventos (D-03, D-65).
+    """
+    from app.services.informes_service import publicar_orden
+
+    justificativo = body.justificativo_urgencia if body else None
+    informe = publicar_orden(
+        db=db,
+        id_orden=id,
+        current_user=current_user,
+        justificativo_urgencia=justificativo,
+    )
+    return {
+        "mensaje": f"Orden publicada exitosamente con folio {informe.folio}.",
+        "folio": informe.folio,
+        "numero_version": informe.numero_version,
+        "estado": informe.estado,
+        "publicado_en": informe.publicado_en.isoformat(),
+        "snapshot_sha256": informe.snapshot_sha256,
+        "id_informe": informe.id_informe,
+    }

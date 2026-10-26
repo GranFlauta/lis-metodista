@@ -206,85 +206,98 @@ export const OrdenDetallePage: React.FC = () => {
 
   return (
     <div className="lis-page-container">
-      {/* Cabecera y Acciones */}
-      <div className="lis-patient-header">
-        <div>
-          <Link
-            to="/ordenes"
-            className="lis-btn lis-btn-text"
-            style={{ paddingLeft: 0, marginBottom: "0.25rem", display: "inline-block" }}
-          >
-            ← Volver a Órdenes
-          </Link>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-            <h2>Orden #{orden.numero_orden_paciente}</h2>
-            <span className={`lis-status-badge ${obtenerClaseEstado(orden.estado_trabajo)}`}>
-              {orden.estado_trabajo}
-            </span>
-            {orden.bloqueada && (
-              <span className="lis-status-badge lis-status-bloqueada">
-                Bloqueada por concurrencia
+      {/* Botón superior de retorno */}
+      <div style={{ marginBottom: "0.85rem" }}>
+        <Link
+          to="/ordenes"
+          className="lis-btn lis-btn-secondary lis-btn-sm"
+          style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontWeight: 600 }}
+        >
+          ← Volver a Órdenes
+        </Link>
+      </div>
+
+      {/* Cabecera Principal Enmarcada con Línea Distintiva */}
+      <div className="lis-table-card" style={{ padding: "1.25rem 1.5rem", marginBottom: "1.25rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1rem" }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+              <h2 style={{ fontSize: "1.35rem", fontWeight: 800, margin: 0, color: "var(--text-main)", letterSpacing: "-0.01em" }}>
+                Orden #{orden.numero_orden_paciente}
+              </h2>
+              <span
+                className={`lis-status-badge ${obtenerClaseEstado(orden.estado_trabajo)}`}
+                style={{ fontSize: "0.8rem", padding: "3px 10px", fontWeight: 700 }}
+              >
+                {orden.estado_trabajo}
+              </span>
+              {orden.bloqueada && (
+                <span className="lis-status-badge lis-status-bloqueada" style={{ fontSize: "0.8rem", padding: "3px 10px" }}>
+                  Bloqueada por concurrencia
+                </span>
+              )}
+              <span
+                className="lis-chip"
+                title="Versión de control de concurrencia optimista"
+                style={{ fontSize: "0.75rem", padding: "2px 8px", fontWeight: 600 }}
+              >
+                v{orden.fila_version}
+              </span>
+            </div>
+            <p className="lis-page-sub" style={{ marginTop: "0.45rem", marginBottom: 0, fontSize: "0.85rem" }}>
+              Solicitud registrada el <strong>{orden.fecha_solicitud}</strong> a las{" "}
+              {new Date(orden.creado_en).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </p>
+          </div>
+
+          {/* Acciones de la Orden */}
+          <div style={{ display: "flex", gap: "0.65rem", alignItems: "center", flexWrap: "wrap" }}>
+            <Link
+              to={`/ordenes/${orden.id}/captura`}
+              className="lis-btn lis-btn-primary"
+              style={{ fontWeight: 700, padding: "8px 16px" }}
+              title="Ingresar a la pantalla de captura analítica de resultados"
+            >
+              {esAdmin ? "Ver captura de resultados" : "Capturar resultados"}
+            </Link>
+
+            {!esAdmin && orden.estado_trabajo !== "PUBLICADA" && !orden.bloqueada && (
+              <>
+                <button
+                  type="button"
+                  className="lis-btn lis-btn-outline"
+                  onClick={handleAbrirEdicion}
+                  title="Editar datos de cabecera (médico, pieza, toma de muestra)"
+                >
+                  Editar cabecera
+                </button>
+
+                <button
+                  type="button"
+                  className="lis-btn lis-btn-danger"
+                  onClick={() => setModalDescartarAbierto(true)}
+                  title="Descartar permanentemente este borrador"
+                >
+                  Descartar borrador
+                </button>
+              </>
+            )}
+
+            {esAdmin && (
+              <span
+                className="lis-chip"
+                style={{
+                  backgroundColor: "#fef3c7",
+                  color: "#92400e",
+                  borderColor: "#fde68a",
+                  padding: "0.4rem 0.75rem",
+                  fontWeight: 600,
+                }}
+              >
+                Modo Auditoría Institucional (Solo Lectura)
               </span>
             )}
-            <span
-              className="lis-chip"
-              title="Versión de control de concurrencia optimista (D2-07)"
-              style={{ fontSize: "0.75rem" }}
-            >
-              v{orden.fila_version}
-            </span>
           </div>
-          <p className="lis-page-sub">
-            Fecha de Solicitud: <strong>{orden.fecha_solicitud}</strong> — Creada el{" "}
-            {new Date(orden.creado_en).toLocaleString()}
-          </p>
-        </div>
-
-        {/* Acciones de la Orden */}
-        <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
-          <Link
-            to={`/ordenes/${orden.id}/captura`}
-            className="lis-btn lis-btn-primary"
-            title="Ingresar a la pantalla de captura analítica de resultados"
-          >
-            {esAdmin ? "Ver captura de resultados" : "Capturar resultados"}
-          </Link>
-
-          {!esAdmin && orden.estado_trabajo !== "PUBLICADA" && !orden.bloqueada && (
-            <>
-              <button
-                type="button"
-                className="lis-btn lis-btn-outline"
-                onClick={handleAbrirEdicion}
-                title="Editar datos de cabecera (origen, médico, toma de muestra)"
-              >
-                Editar cabecera
-              </button>
-
-              <button
-                type="button"
-                className="lis-btn lis-btn-danger"
-                onClick={() => setModalDescartarAbierto(true)}
-                title="Descartar permanentemente este borrador"
-              >
-                Descartar borrador
-              </button>
-            </>
-          )}
-
-          {esAdmin && (
-            <span
-              className="lis-chip"
-              style={{
-                backgroundColor: "#fef3c7",
-                color: "#92400e",
-                borderColor: "#fde68a",
-                padding: "0.4rem 0.75rem",
-              }}
-            >
-              Modo Auditoría Institucional (Solo Lectura)
-            </span>
-          )}
         </div>
       </div>
 
@@ -301,7 +314,7 @@ export const OrdenDetallePage: React.FC = () => {
         </div>
       )}
 
-      {/* Cabecera Unificada: Paciente, Orden y Muestra (§6) */}
+      {/* Cabecera Unificada: Paciente, Orden y Muestra */}
       <div className="lis-table-card" style={{ marginBottom: "1.25rem" }}>
         <div
           style={{
@@ -315,12 +328,12 @@ export const OrdenDetallePage: React.FC = () => {
           }}
         >
           <div>
-            <h3 style={{ fontSize: "1.1rem", fontWeight: 700, margin: 0, color: "var(--text-main)" }}>
+            <h3 style={{ fontSize: "1.15rem", fontWeight: 700, margin: 0, color: "var(--text-main)" }}>
               {orden.paciente.apellido_paterno}{" "}
               {orden.paciente.apellido_materno ? `${orden.paciente.apellido_materno} ` : ""}
               {orden.paciente.nombres}
             </h3>
-            <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+            <span style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "2px", display: "inline-block" }}>
               {orden.paciente.ci
                 ? `CI: ${orden.paciente.ci}${
                     orden.paciente.ci_complemento ? `-${orden.paciente.ci_complemento}` : ""
@@ -344,31 +357,27 @@ export const OrdenDetallePage: React.FC = () => {
             <span className="lis-info-value">{orden.paciente.fecha_nacimiento || "No registrada"}</span>
           </div>
           <div className="lis-info-field">
-            <span className="lis-info-label">Edad Registrada</span>
-            <span className="lis-info-value">
-              {orden.edad_anios !== null
-                ? `${orden.edad_anios} años${orden.edad_meses ? `, ${orden.edad_meses} m` : ""}`
-                : "No calculada"}
-            </span>
-          </div>
-          <div className="lis-info-field">
             <span className="lis-info-label">Bioquímico Responsable</span>
-            <span className="lis-info-value">
+            <span className="lis-info-value" style={{ fontWeight: 600 }}>
               {orden.autor.nombres} {orden.autor.apellido_paterno}
             </span>
           </div>
 
+          {/* Origen de Solicitud (comentado a requerimiento) */}
+          {/*
           <div className="lis-info-field">
             <span className="lis-info-label">Origen de Solicitud</span>
             <span className="lis-info-value">{orden.origen_solicitud || "No especificado"}</span>
           </div>
+          */}
+
           <div className="lis-info-field">
             <span className="lis-info-label">Médico Solicitante</span>
             <span className="lis-info-value">{orden.medico_solicitante || "No especificado"}</span>
           </div>
           <div className="lis-info-field">
-            <span className="lis-info-label">Pieza / Sala / Cama</span>
-            <span className="lis-info-value">{orden.pieza || "No especificada"}</span>
+            <span className="lis-info-label">Pieza</span>
+            <span className="lis-info-value">{orden.pieza || "No asignada"}</span>
           </div>
           <div className="lis-info-field">
             <span className="lis-info-label">Toma de Muestra</span>
@@ -389,18 +398,27 @@ export const OrdenDetallePage: React.FC = () => {
 
       {/* Determinaciones y Estudios Solicitados */}
       <div className="lis-table-card" style={{ marginBottom: "1.5rem" }}>
-        <div style={{ padding: "1rem 1.5rem", borderBottom: "1px solid var(--border-color)" }}>
-          <h3 style={{ fontSize: "1.05rem", fontWeight: 700, margin: 0 }}>
-            Estudios Solicitados (
-            {orden.estudios.length +
-              obtenerEstudiosAgregados(orden.id).filter(
-                (extra) => !orden.estudios.some((e) => e.codigo === extra.codigo)
-              ).length}
-            )
-          </h3>
-          <p className="lis-page-sub" style={{ marginTop: "0.25rem" }}>
-            Determinaciones congeladas según la versión del catálogo al momento de crear la orden.
-          </p>
+        <div
+          style={{
+            padding: "1rem 1.5rem",
+            borderBottom: "1px solid var(--border-color)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <h3 style={{ fontSize: "1.05rem", fontWeight: 700, margin: 0 }}>
+              Estudios Solicitados
+            </h3>
+            <span className="lis-chip lis-chip-primary" style={{ fontWeight: 700 }}>
+              {orden.estudios.length +
+                obtenerEstudiosAgregados(orden.id).filter(
+                  (extra) => !orden.estudios.some((e) => e.codigo === extra.codigo)
+                ).length}{" "}
+              estudios
+            </span>
+          </div>
         </div>
 
         <div style={{ padding: "1.25rem 1.5rem" }}>
@@ -494,6 +512,8 @@ export const OrdenDetallePage: React.FC = () => {
               <div className="lis-modal-body">
                 {errorEdicion && <div className="lis-alert lis-alert-error">{errorEdicion}</div>}
 
+                {/* Origen de Solicitud (comentado a requerimiento) */}
+                {/*
                 <div className="lis-form-group">
                   <label htmlFor="edit-origen">Origen de la Solicitud</label>
                   <input
@@ -505,6 +525,7 @@ export const OrdenDetallePage: React.FC = () => {
                     maxLength={100}
                   />
                 </div>
+                */}
 
                 <div className="lis-form-group">
                   <label htmlFor="edit-medico">Médico Solicitante</label>
@@ -519,7 +540,7 @@ export const OrdenDetallePage: React.FC = () => {
                 </div>
 
                 <div className="lis-form-group">
-                  <label htmlFor="edit-pieza">Pieza / Cama / Sala</label>
+                  <label htmlFor="edit-pieza">Pieza</label>
                   <input
                     id="edit-pieza"
                     type="text"

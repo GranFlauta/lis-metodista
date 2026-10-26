@@ -107,12 +107,42 @@ def evaluar_rango_y_bandera(
     valor_numerico: Decimal | None,
     sexo_paciente: str | None,
     edad_meses_orden: int | None,
-) -> tuple[dict[str, str | None] | None, str | None]:
+    override: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any] | None, str | None]:
     """
-    Selecciona el rango de referencia aplicable por sexo y edad en meses (D3-07).
-    Evalúa si el valor es BAJO, NORMAL o ALTO respetando límites inclusivos/exclusivos.
-    Solo aplica a valores numéricos; para cualitativos o sin rango devuelve (None, None).
+    Selecciona el rango de referencia aplicable por sexo y edad en meses (D3-07),
+    o aplica el rango override personalizado para esta orden si existe.
+    Evalúa si el valor es BAJO, NORMAL o ALTO respetando límites.
     """
+    if override and override.get("modificada") and not override.get("reestablecer"):
+        inf_val = override.get("limite_inferior")
+        sup_val = override.get("limite_superior")
+        txt_val = override.get("texto")
+
+        inf_dec = a_decimal(inf_val) if (inf_val is not None and str(inf_val).strip() != "") else None
+        sup_dec = a_decimal(sup_val) if (sup_val is not None and str(sup_val).strip() != "") else None
+
+        inf_str = formatear_decimal(inf_dec) if inf_dec is not None else None
+        sup_str = formatear_decimal(sup_dec) if sup_dec is not None else None
+
+        ref_dict = {
+            "texto": txt_val or (f"{inf_str} - {sup_str}" if inf_str and sup_str else None),
+            "inferior": inf_str,
+            "superior": sup_str,
+            "modificada": True,
+        }
+
+        if valor_numerico is None:
+            return ref_dict, None
+
+        bandera = "NORMAL"
+        if inf_dec is not None and valor_numerico < inf_dec:
+            bandera = "BAJO"
+        elif sup_dec is not None and valor_numerico > sup_dec:
+            bandera = "ALTO"
+
+        return ref_dict, bandera
+
     if parametro.tipo_campo not in ("NUMERICO", "CALCULADO") or not parametro.rangos_referencia:
         return None, None
 
@@ -154,6 +184,7 @@ def evaluar_rango_y_bandera(
         "texto": r_elegido.referencia_texto or (f"{inf_str} - {sup_str}" if inf_str and sup_str else None),
         "inferior": inf_str,
         "superior": sup_str,
+        "modificada": False,
     }
 
     if valor_numerico is None:
@@ -303,6 +334,18 @@ def normalizar_y_validar_valor_entrada(
     val_str = str(valor_crudo).strip()
 
     if tipo == "NUMERICO":
+        if parametro.decimales == 0:
+            # En parámetros enteros (ej. PLAQUETAS, recuentos enteros en miles),
+            # los puntos o espacios se usan habitualmente como separadores de miles (ej. 150.000, 123.456).
+            texto_limpio = val_str.replace(" ", "").replace(".", "").replace(",", "")
+            try:
+                d = Decimal(texto_limpio)
+            except InvalidOperation:
+                raise ValidacionError(f"Valor numérico inválido para {parametro.codigo}: {val_str}")
+            if d < 0:
+                raise ValidacionError(f"El valor de {parametro.codigo} no puede ser negativo.")
+            return d, None
+
         texto_punto = val_str.replace(",", ".")
         try:
             d = Decimal(texto_punto)
@@ -352,6 +395,7 @@ def normalizar_y_validar_valor_entrada(
 def evaluar_captura_orden(
     orden: Orden,
     valores_simulados: dict[str, Any] | None = None,
+    overrides_simulados: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Construye la forma común de respuesta ("captura") según §8.1.
@@ -364,37 +408,46 @@ def evaluar_captura_orden(
     # Alcance de parámetros por estudio
     alcance_por_oe = obtener_parametros_alcance_orden(orden)
 
+    session = Session.object_session(orden)
+    if session:
+        filas_db = (
+            session.query(ResultadoBorrador)
+            .join(OrdenEstudio)
+            .filter(OrdenEstudio.id_orden == orden.id_orden, ResultadoBorrador.id_edicion.is_(None))
+            .all()
+        )
+    else:
+        filas_db = [rb for oe in orden.estudios for rb in oe.resultados if rb.id_edicion is None]
+
+    overrides_por_param_id: dict[int, dict[str, Any]] = {}
+    for rb in filas_db:
+        if getattr(rb, "ref_modificada", False):
+            overrides_por_param_id[rb.id_parametro] = {
+                "limite_inferior": getattr(rb, "ref_inferior_override", None),
+                "limite_superior": getattr(rb, "ref_superior_override", None),
+                "texto": getattr(rb, "ref_texto_override", None),
+                "modificada": True,
+            }
+
     # Cargar valores existentes o mapear simulados
     # mapa_por_oe_param: id_orden_estudio -> codigo -> (valor_numerico, valor_texto, confirmado, es_defecto)
     mapa_valores: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
 
-    if valores_simulados is None:
-        # Modo lectura persistida
-        session = Session.object_session(orden)
-        if session:
-            filas_db = (
-                session.query(ResultadoBorrador)
-                .join(OrdenEstudio)
-                .filter(OrdenEstudio.id_orden == orden.id_orden, ResultadoBorrador.id_edicion.is_(None))
-                .all()
-            )
-        else:
-            filas_db = [rb for oe in orden.estudios for rb in oe.resultados if rb.id_edicion is None]
+    # 1. Cargar filas persistidas de base de datos
+    for rb in filas_db:
+        if rb.parametro:
+            cod = rb.parametro.codigo
+            mapa_valores[rb.id_orden_estudio][cod] = {
+                "valor_numerico": rb.valor_numerico,
+                "valor_texto": rb.valor_texto,
+                "confirmado": rb.confirmado,
+                "es_defecto": False,
+                "es_calculado": rb.es_calculado,
+                "calculable": rb.calculable,
+            }
 
-        for rb in filas_db:
-            if rb.parametro:
-                cod = rb.parametro.codigo
-                mapa_valores[rb.id_orden_estudio][cod] = {
-                    "valor_numerico": rb.valor_numerico,
-                    "valor_texto": rb.valor_texto,
-                    "confirmado": rb.confirmado,
-                    "es_defecto": False,
-                    "es_calculado": rb.es_calculado,
-                    "calculable": rb.calculable,
-                }
-    else:
-        # Modo simulación
-        # Normalizar entradas simuladas
+    # 2. Si hay valores_simulados (POST /calcular), fusionar y actualizar sobre los existentes
+    if valores_simulados is not None:
         for oe in orden.estudios:
             params_alcance = alcance_por_oe[oe.id_orden_estudio]
             params_map = {p.codigo: p for p in params_alcance}
@@ -411,6 +464,9 @@ def evaluar_captura_orden(
                             "es_calculado": False,
                             "calculable": True,
                         }
+                    else:
+                        if cod in mapa_valores[oe.id_orden_estudio]:
+                            del mapa_valores[oe.id_orden_estudio][cod]
 
     # Procesar estudios, cálculos, banderas y validaciones
     estudios_resp = []
@@ -523,8 +579,29 @@ def evaluar_captura_orden(
                     confirmado = True
                     es_defecto = False
 
-            # Evaluar referencia y bandera
-            ref_dict, bandera = evaluar_rango_y_bandera(p, v_num, paciente.sexo if paciente else None, edad_meses_total)
+            # Evaluar referencia y bandera (considerando overrides persistidos o simulados)
+            override_param: dict[str, Any] | None = None
+            if overrides_simulados and p.codigo in overrides_simulados:
+                ov = overrides_simulados[p.codigo]
+                if hasattr(ov, "dict"):
+                    ov = ov.dict()
+                elif hasattr(ov, "model_dump"):
+                    ov = ov.model_dump()
+                if ov.get("reestablecer"):
+                    override_param = {"reestablecer": True, "modificada": False}
+                else:
+                    override_param = {
+                        "limite_inferior": ov.get("limite_inferior"),
+                        "limite_superior": ov.get("limite_superior"),
+                        "texto": ov.get("texto"),
+                        "modificada": True,
+                    }
+            elif p.id_parametro in overrides_por_param_id:
+                override_param = overrides_por_param_id[p.id_parametro]
+
+            ref_dict, bandera = evaluar_rango_y_bandera(
+                p, v_num, paciente.sexo if paciente else None, edad_meses_total, override=override_param
+            )
 
             # Evaluación de completitud para este parámetro
             if p.obligatorio:
@@ -570,8 +647,11 @@ def evaluar_captura_orden(
 
         grupos_sel = [g.grupo for g in oe.grupos] if est.seleccion_parcial else None
         estudios_resp.append({
+            "id_orden_estudio": oe.id_orden_estudio,
+            "id_estudio": est.id_estudio,
             "codigo": est.codigo,
             "nombre": est.nombre,
+            "observaciones": oe.observaciones,
             "grupos_seleccionados": grupos_sel,
             "secciones": secciones,
             "validaciones": validaciones_estudio,
@@ -587,6 +667,7 @@ def evaluar_captura_orden(
             "paciente": {"id": paciente.id_paciente, "sexo": paciente.sexo} if paciente else None,
             "edad_anios": orden.edad_anios,
             "edad_meses": orden.edad_meses,
+            "observaciones": orden.observaciones,
         },
         "estudios": estudios_resp,
         "completitud": {
@@ -603,6 +684,9 @@ def guardar_resultados_orden(
     orden: Orden,
     valores_cambios: dict[str, Any],
     usuario: Usuario,
+    rangos_override: dict[str, Any] | None = None,
+    observaciones_estudios: dict[str, str | None] | None = None,
+    observaciones_orden: str | None = None,
 ) -> dict[str, Any]:
     """
     Persiste los cambios parciales en `resultados_borrador`, recalcula todos los CALCULADO
@@ -614,6 +698,17 @@ def guardar_resultados_orden(
 
     if len(valores_cambios) > 200:
         raise ValidacionError("Máximo 200 claves por petición.")
+
+    # Guardar observaciones de la orden si se enviaron
+    if observaciones_orden is not None:
+        orden.observaciones = observaciones_orden.strip() if observaciones_orden.strip() else None
+
+    # Guardar observaciones por estudio si se enviaron
+    if observaciones_estudios is not None:
+        for oe in orden.estudios:
+            if oe.estudio.codigo in observaciones_estudios:
+                obs_val = observaciones_estudios[oe.estudio.codigo]
+                oe.observaciones = obs_val.strip() if obs_val and obs_val.strip() else None
 
     alcance_por_oe = obtener_parametros_alcance_orden(orden)
     # Mapear códigos a (OrdenEstudio, Parametro)
@@ -648,9 +743,16 @@ def guardar_resultados_orden(
         )
 
         if v_num is None and v_txt is None:
-            # null borra la fila (test 8)
+            # null borra la fila a menos que tenga un override de referencia activo
             if rb:
-                db.delete(rb)
+                if getattr(rb, "ref_modificada", False):
+                    rb.valor_numerico = None
+                    rb.valor_texto = None
+                    rb.confirmado = False
+                    rb.actualizado_por = usuario.id_usuario
+                    rb.actualizado_en = now
+                else:
+                    db.delete(rb)
         else:
             if rb:
                 rb.valor_numerico = v_num
@@ -674,6 +776,73 @@ def guardar_resultados_orden(
                     actualizado_en=now,
                 )
                 db.add(rb)
+
+    db.flush()
+
+    # 2.1 Aplicar rangos_override si fueron suministrados
+    if rangos_override:
+        for cod, ro_item in rangos_override.items():
+            if cod not in mapa_codigo_alcance:
+                raise ValidacionError(f"El parámetro '{cod}' no pertenece al alcance de la orden.")
+            oe, param = mapa_codigo_alcance[cod]
+            ro_dict = ro_item.model_dump() if hasattr(ro_item, "model_dump") else (ro_item.dict() if hasattr(ro_item, "dict") else ro_item)
+            es_reestablecer = ro_dict.get("reestablecer", False)
+
+            rb = (
+                db.query(ResultadoBorrador)
+                .filter(
+                    ResultadoBorrador.id_orden_estudio == oe.id_orden_estudio,
+                    ResultadoBorrador.id_parametro == param.id_parametro,
+                    ResultadoBorrador.id_edicion.is_(None),
+                )
+                .first()
+            )
+
+            if es_reestablecer:
+                if rb:
+                    rb.ref_modificada = False
+                    rb.ref_inferior_override = None
+                    rb.ref_superior_override = None
+                    rb.ref_texto_override = None
+                    rb.actualizado_por = usuario.id_usuario
+                    rb.actualizado_en = now
+                    # Si no tiene valor y tampoco es calculado, se limpia la fila vacía
+                    if rb.valor_numerico is None and rb.valor_texto is None and not rb.es_calculado:
+                        db.delete(rb)
+            else:
+                inf_val = ro_dict.get("limite_inferior")
+                sup_val = ro_dict.get("limite_superior")
+                txt_val = ro_dict.get("texto")
+
+                inf_ov = a_decimal(inf_val) if (inf_val is not None and str(inf_val).strip() != "") else None
+                sup_ov = a_decimal(sup_val) if (sup_val is not None and str(sup_val).strip() != "") else None
+                txt_ov = str(txt_val).strip() if (txt_val is not None and str(txt_val).strip() != "") else None
+
+                if not rb:
+                    rb = ResultadoBorrador(
+                        id_orden_estudio=oe.id_orden_estudio,
+                        id_parametro=param.id_parametro,
+                        id_edicion=None,
+                        valor_numerico=None,
+                        valor_texto=None,
+                        es_calculado=(param.tipo_campo == "CALCULADO"),
+                        calculable=False,
+                        confirmado=False,
+                        ref_modificada=True,
+                        ref_inferior_override=inf_ov,
+                        ref_superior_override=sup_ov,
+                        ref_texto_override=txt_ov,
+                        actualizado_por=usuario.id_usuario,
+                        actualizado_en=now,
+                    )
+                    db.add(rb)
+                else:
+                    rb.ref_modificada = True
+                    rb.ref_inferior_override = inf_ov
+                    rb.ref_superior_override = sup_ov
+                    rb.ref_texto_override = txt_ov
+                    rb.actualizado_por = usuario.id_usuario
+                    rb.actualizado_en = now
 
     db.flush()
 

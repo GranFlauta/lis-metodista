@@ -204,3 +204,30 @@ export async function obtenerResumenOrdenesApi(): Promise<OrdenesResumenResponse
     method: "GET",
   });
 }
+
+export interface AgregarEstudioPayload {
+  codigo: string;
+  grupos?: string[] | null;
+}
+
+export async function agregarEstudioAOrdenApi(idOrden: number, payload: AgregarEstudioPayload): Promise<OrdenDetalle> {
+  return apiClient<OrdenDetalle>(`/api/ordenes/${idOrden}/estudios`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function actualizarGruposEstudioApi(idOrden: number, idEstudio: number, grupos: string[]): Promise<OrdenDetalle> {
+  return apiClient<OrdenDetalle>(`/api/ordenes/${idOrden}/estudios/${idEstudio}/grupos`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ grupos }),
+  });
+}
+
+export async function eliminarEstudioDeOrdenApi(idOrden: number, idEstudio: number): Promise<{ message: string; orden_descartada?: boolean }> {
+  return apiClient<{ message: string; orden_descartada?: boolean }>(`/api/ordenes/${idOrden}/estudios/${idEstudio}`, {
+    method: "DELETE",
+  });
+}

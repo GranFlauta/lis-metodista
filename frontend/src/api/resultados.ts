@@ -21,12 +21,21 @@ export interface CapturaOrdenInfo {
   };
   edad_anios: number | null;
   edad_meses: number | null;
+  observaciones?: string | null;
 }
 
 export interface RangoReferenciaInfo {
   texto: string | null;
   inferior: string | null;
   superior: string | null;
+  modificada?: boolean;
+}
+
+export interface RangoOverrideItem {
+  limite_inferior?: number | string | null;
+  limite_superior?: number | string | null;
+  texto?: string | null;
+  reestablecer?: boolean;
 }
 
 export interface ParametroCaptura {
@@ -63,8 +72,11 @@ export interface ValidacionEstudio {
 }
 
 export interface EstudioCaptura {
+  id_orden_estudio?: number;
+  id_estudio?: number;
   codigo: string;
   nombre: string;
+  observaciones?: string | null;
   grupos_seleccionados: string[] | null;
   secciones: SeccionCaptura[];
   validaciones: ValidacionEstudio[];
@@ -98,16 +110,17 @@ export async function getCapturaOrdenApi(id: number): Promise<CapturaOrdenRespon
 
 /**
  * Vista previa síncrona sin persistencia en BD.
- * Envía todos los valores actuales del formulario.
+ * Envía todos los valores actuales del formulario y overrides simulados.
  */
 export async function calcularResultadosApi(
   id: number,
-  valores: Record<string, string | null>
+  valores: Record<string, string | null>,
+  rangos_override?: Record<string, RangoOverrideItem>
 ): Promise<CapturaOrdenResponse> {
   return apiClient<CapturaOrdenResponse>(`/api/ordenes/${id}/calcular`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ valores }),
+    body: JSON.stringify({ valores, rangos_override }),
   });
 }
 
@@ -117,12 +130,20 @@ export async function calcularResultadosApi(
  */
 export async function guardarResultadosApi(
   id: number,
-  valores: Record<string, string | null>
+  valores: Record<string, string | null>,
+  rangos_override?: Record<string, RangoOverrideItem>,
+  observaciones_estudios?: Record<string, string | null>,
+  observaciones_orden?: string | null
 ): Promise<CapturaOrdenResponse> {
   return apiClient<CapturaOrdenResponse>(`/api/ordenes/${id}/resultados`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ valores }),
+    body: JSON.stringify({
+      valores,
+      rangos_override,
+      observaciones_estudios,
+      observaciones_orden,
+    }),
   });
 }
 

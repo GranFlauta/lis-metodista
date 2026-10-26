@@ -588,9 +588,10 @@ export const NuevaOrdenPage: React.FC = () => {
                       marginTop: "8px",
                       maxHeight: "180px",
                       overflowY: "auto",
+                      overscrollBehavior: "contain",
                       border: "1px solid var(--border-color)",
                       borderRadius: "var(--radius)",
-                      backgroundColor: "#ffffff",
+                      backgroundColor: "var(--bg-card, #ffffff)",
                     }}
                   >
                     {cargandoPacientes ? (
@@ -850,16 +851,9 @@ export const NuevaOrdenPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Botón principal Continuar en la cabecera */}
-              <div style={{ marginTop: "auto", paddingTop: "6px" }}>
-                <button
-                  type="submit"
-                  className="lis-btn lis-btn-primary lis-btn-block"
-                  style={{ height: "42px", fontSize: "15px", fontWeight: 700 }}
-                  disabled={!puedeContinuar}
-                >
-                  Continuar a confirmación →
-                </button>
+              {/* Indicador de confirmación al pie */}
+              <div style={{ marginTop: "auto", paddingTop: "8px", fontSize: "12px", color: "var(--text-muted)", textAlign: "center" }}>
+                <span>Seleccione los estudios abajo y confirme la orden al final de la pantalla</span>
               </div>
             </div>
           </section>
@@ -1014,6 +1008,7 @@ export const NuevaOrdenPage: React.FC = () => {
         <div className="lis-zone-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <h2 className="lis-zone-title" style={{ margin: 0, fontSize: "1.05rem" }}>
+              <span className="lis-zone-badge">4</span>
               Órdenes Recientes (Publicadas y Pendientes)
             </h2>
             <span className="lis-chip">
