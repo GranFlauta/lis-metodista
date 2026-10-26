@@ -364,7 +364,7 @@ export const ConfiguracionSesionPage: React.FC = () => {
                 disabled={guardando}
                 className="lis-btn lis-btn-primary"
                 style={{
-                  backgroundColor: "#2563EB",
+                  backgroundColor: "var(--primary)",
                   color: "#FFFFFF",
                   border: "none",
                   padding: "8px 16px",
@@ -448,7 +448,7 @@ export const ConfiguracionSesionPage: React.FC = () => {
                 onClick={handleConfirmarGuardado}
                 className="lis-btn lis-btn-primary"
                 style={{
-                  backgroundColor: "#2563EB",
+                  backgroundColor: "var(--primary)",
                   color: "#FFFFFF",
                   border: "none",
                   padding: "6px 12px",
