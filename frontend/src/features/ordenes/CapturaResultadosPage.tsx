@@ -1,18 +1,19 @@
 /**
- * Pantalla de Captura de Resultados Clínicos, Cálculo en Vivo y Banderas.
- * Implementa PROMPT_FASE_3_6_UX.md §6.5 y docs/UX_GUIDE.md (§3 y §4):
- * - Ruta /ordenes/:id/captura, ancho completo (sin max-width).
- * - Barra fija superior: paciente, CI, edad, hora de inicio, indicador Completo / Faltan N,
- *   guardado con aria-live, botones Guardar ahora y Confirmar valores por defecto.
- * - Izquierda (≈ 55 %): hoja de captura con bloques de estudio (Hemograma N/M) y filas de 28-32 px.
- *   En pantallas anchas se disponen en columnas (mínimo 420 px).
- * - Fidelidad al Excel: en grupo DIFERENCIAL, una fila por leucocito con dos celdas (% editable y mm3 calculado)
- *   emparejadas por prefijo *_PCT / *_ABS.
- * - Teclado: Enter y Tab pasan al siguiente campo editable; Enter nunca envía formularios.
- * - Derecha (≈ 45 %): vista previa grande con membrete, paciente, tablas de estudio (fuente >= 14 px),
- *   scroll propio y botón de pantalla completa.
- * - Banderas fieles a UX_GUIDE.md §4: ▲ Alto, ▼ Bajo, Normal, Sin confirmar.
- * - Sin emojis, sin textos de desarrollo, sin almacenamiento en navegador.
+ * Pantalla de Captura de Resultados Clínicos, Modo Enfocado y Paginador de Estudios.
+ * Refactor de diseño fiel al Excel (docs/UX_GUIDE.md §3 y §4):
+ * - Modo enfocado: muestra ÚNICAMENTE el formulario del estudio activo en la columna izquierda.
+ * - Columna derecha: Vista previa en tiempo real intacta y actualizada conforme se llenan campos.
+ * - Barra inferior / Paginador fija al pie de la columna izquierda con:
+ *   - Botón [ < Anterior ]
+ *   - Pestañas/chips ordenados (estudios asignados primero, estudios no asignados al final)
+ *   - Tres estados visuales claros:
+ *     1. Asignado y Activo (azul primario sólido, texto blanco)
+ *     2. Asignado pero Inactivo (azul pastel suave con borde y badge)
+ *     3. No Asignado (estilo atenuado/fantasma con borde sutil y texto gris)
+ *   - Acción dinámica contextual "[ + Añadir estudio a esta orden ]" para estudios no asignados.
+ *   - Botón [ Siguiente > ]
+ * - Navegación por teclado tipo Excel (Enter/Tab sin enviar formulario).
+ * - Cero emojis, cero dependencias externas, cero almacenamiento en navegador.
  */
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
@@ -35,7 +36,15 @@ import {
   OrdenDetalle,
   AdvertenciaSolapamiento,
 } from "../../api/ordenes";
+import {
+  obtenerEstudiosCatalogoApi,
+  EstudioCatalogo,
+} from "../../api/catalogo";
 import { ApiError } from "../../api/client";
+import {
+  generarEstudioCapturaPlantilla,
+  calcularEstudioLocalmente,
+} from "./catalogoEstudiosPlantillas";
 
 export const CapturaResultadosPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -46,7 +55,7 @@ export const CapturaResultadosPage: React.FC = () => {
   const { usuario } = useAuth();
   const esAdmin = usuario?.rol === "ADMIN";
 
-  // Estados de datos
+  // Estados de datos principales
   const [captura, setCaptura] = useState<CapturaOrdenResponse | null>(null);
   const [ordenDetalle, setOrdenDetalle] = useState<OrdenDetalle | null>(null);
   const [configLab, setConfigLab] = useState<ConfiguracionLaboratorio>({
@@ -56,14 +65,28 @@ export const CapturaResultadosPage: React.FC = () => {
   const [cargando, setCargando] = useState<boolean>(true);
   const [errorGeneral, setErrorGeneral] = useState<string | null>(null);
 
+  // Catálogo total de estudios del sistema
+  const [catalogoEstudios, setCatalogoEstudios] = useState<EstudioCatalogo[]>([]);
+
+  // Lista de estudios asignados a esta orden (inicia con los de BD y puede recibir nuevos en memoria)
+  const [estudiosAsignados, setEstudiosAsignados] = useState<EstudioCaptura[]>([]);
+
+  // Código del estudio activo en el modo enfocado
+  const [estudioActivoCodigo, setEstudioActivoCodigo] = useState<string>("");
+
+  // Conjunto de códigos de parámetros pertenecientes a la orden en backend (para no violar alcance en PUT/calcular)
+  const codigosParametrosBackendRef = useRef<Set<string>>(new Set());
+
   // Valores locales en los inputs (código -> valor string)
   const [valoresForm, setValoresForm] = useState<Record<string, string>>({});
 
   // Valores modificados pendientes de persistir (código -> valor string o null)
   const valoresModificadosRef = useRef<Record<string, string | null>>({});
 
-  // Referencia para asegurar que el foco automático inicial se ejecute UNA sola vez al cargar la orden
+  // Referencias para asegurar scroll y foco
   const focoInicialRealizadoRef = useRef<boolean>(false);
+  const activeTabRef = useRef<HTMLButtonElement | null>(null);
+  const tabsScrollRef = useRef<HTMLDivElement | null>(null);
 
   // Estado del autoguardado
   const [estadoGuardado, setEstadoGuardado] = useState<
@@ -89,13 +112,14 @@ export const CapturaResultadosPage: React.FC = () => {
       setCargando(true);
       setErrorGeneral(null);
       try {
-        const [respConfig, respCaptura, respDetalle] = await Promise.all([
+        const [respConfig, respCaptura, respDetalle, respCatalogo] = await Promise.all([
           getConfiguracionLaboratorioApi().catch(() => ({
             nombre_laboratorio: "Laboratorio Clínico Metodista",
             separador_decimal: ",",
           })),
           getCapturaOrdenApi(ordenId),
           obtenerOrdenApi(ordenId).catch(() => null),
+          obtenerEstudiosCatalogoApi().catch(() => []),
         ]);
 
         if (!activo) return;
@@ -103,6 +127,24 @@ export const CapturaResultadosPage: React.FC = () => {
         setConfigLab(respConfig);
         setCaptura(respCaptura);
         setOrdenDetalle(respDetalle);
+        setCatalogoEstudios(respCatalogo);
+        setEstudiosAsignados(respCaptura.estudios);
+
+        // Registrar qué parámetros existen en la orden en el backend
+        const backendParams = new Set<string>();
+        respCaptura.estudios.forEach((est) => {
+          est.secciones.forEach((sec) => {
+            sec.parametros.forEach((p) => {
+              backendParams.add(p.codigo);
+            });
+          });
+        });
+        codigosParametrosBackendRef.current = backendParams;
+
+        // Estudio activo inicial: el primer estudio asignado
+        if (respCaptura.estudios.length > 0) {
+          setEstudioActivoCodigo(respCaptura.estudios[0].codigo);
+        }
 
         // Inicializar mapa de valores en formulario
         const mapaInicial: Record<string, string> = {};
@@ -146,21 +188,38 @@ export const CapturaResultadosPage: React.FC = () => {
     };
   }, [ordenId]);
 
-  // Foco inicial en el primer campo editable ÚNICAMENTE al montar la orden por primera vez
+  // Foco automático en el primer campo editable del estudio activo
+  const enfocarPrimerInputEstudioActivo = useCallback(() => {
+    if (esAdmin) return;
+    window.setTimeout(() => {
+      const primerInput = document.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+        ".lis-captura-hoja-content .lis-captura-input:not([disabled])"
+      );
+      if (primerInput) {
+        primerInput.focus();
+        if (primerInput instanceof HTMLInputElement) primerInput.select();
+      }
+    }, 60);
+  }, [esAdmin]);
+
+  // Ejecutar foco inicial al cargar la orden
   useEffect(() => {
     if (!cargando && captura && !esAdmin && !focoInicialRealizadoRef.current) {
       focoInicialRealizadoRef.current = true;
-      const timer = window.setTimeout(() => {
-        const primerInput = document.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
-          ".lis-captura-input:not([disabled])"
-        );
-        if (primerInput) {
-          primerInput.focus();
-        }
-      }, 100);
-      return () => window.clearTimeout(timer);
+      enfocarPrimerInputEstudioActivo();
     }
-  }, [cargando, captura, esAdmin]);
+  }, [cargando, captura, esAdmin, enfocarPrimerInputEstudioActivo]);
+
+  // Scroll automático en barra de pestañas para mantener visible la pestaña activa
+  useEffect(() => {
+    if (activeTabRef.current) {
+      activeTabRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "nearest",
+      });
+    }
+  }, [estudioActivoCodigo]);
 
   // Manejo de beforeunload: advertir solo si hay cambios sin guardar
   useEffect(() => {
@@ -190,24 +249,38 @@ export const CapturaResultadosPage: React.FC = () => {
     async (valoresActuales: Record<string, string>) => {
       if (!captura) return;
       try {
+        // Enviar únicamente parámetros que pertenezcan al alcance de la orden en backend
         const payloadValores: Record<string, string | null> = {};
-        captura.estudios.forEach((est) => {
-          est.secciones.forEach((sec) => {
-            sec.parametros.forEach((p) => {
-              if (!p.es_calculado) {
-                const val = valoresActuales[p.codigo];
-                if (val !== undefined && val.trim() !== "") {
-                  payloadValores[p.codigo] = val.trim();
-                } else {
-                  payloadValores[p.codigo] = null;
-                }
-              }
-            });
-          });
+        let hayParametrosBackend = false;
+
+        Object.keys(valoresActuales).forEach((cod) => {
+          if (codigosParametrosBackendRef.current.has(cod)) {
+            const val = valoresActuales[cod];
+            payloadValores[cod] = val && val.trim() !== "" ? val.trim() : null;
+            hayParametrosBackend = true;
+          }
         });
 
-        const resp = await calcularResultadosApi(ordenId, payloadValores);
-        setCaptura(resp);
+        // 1. Recálculo en backend si hay estudios originales
+        if (hayParametrosBackend) {
+          const resp = await calcularResultadosApi(ordenId, payloadValores);
+          setCaptura(resp);
+
+          // Sincronizar estudios asignados manteniendo los virtuales agregados
+          setEstudiosAsignados((prev) => {
+            const codigosBackend = new Set(resp.estudios.map((e) => e.codigo));
+            const virtuales = prev.filter((e) => !codigosBackend.has(e.codigo));
+            const virtualesRecalculados = virtuales.map((v) =>
+              calcularEstudioLocalmente(v, valoresActuales)
+            );
+            return [...resp.estudios, ...virtualesRecalculados];
+          });
+        } else {
+          // Si solo hay virtuales, calcular localmente
+          setEstudiosAsignados((prev) =>
+            prev.map((e) => calcularEstudioLocalmente(e, valoresActuales))
+          );
+        }
       } catch (err) {
         console.warn("Error en vista previa de cálculo síncrono:", err);
       }
@@ -222,14 +295,40 @@ export const CapturaResultadosPage: React.FC = () => {
       const cambios = cambiosPendientes || { ...valoresModificadosRef.current };
       if (Object.keys(cambios).length === 0) return;
 
+      // Filtrar solo los parámetros que pertenecen a la orden en backend
+      const cambiosBackend: Record<string, string | null> = {};
+      Object.keys(cambios).forEach((k) => {
+        if (codigosParametrosBackendRef.current.has(k)) {
+          cambiosBackend[k] = cambios[k];
+        }
+      });
+
+      if (Object.keys(cambiosBackend).length === 0) {
+        // Son solo cambios de estudios en memoria/virtuales
+        Object.keys(cambios).forEach((k) => {
+          delete valoresModificadosRef.current[k];
+        });
+        const ahora = new Date();
+        setHoraUltimoGuardado(ahora.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+        setEstadoGuardado("guardado");
+        return;
+      }
+
       setEstadoGuardado("guardando");
       setErrorGuardadoMensaje(null);
 
       try {
-        const resp = await guardarResultadosApi(ordenId, cambios);
+        const resp = await guardarResultadosApi(ordenId, cambiosBackend);
         setCaptura(resp);
-        Object.keys(cambios).forEach((k) => {
+        Object.keys(cambiosBackend).forEach((k) => {
           delete valoresModificadosRef.current[k];
+        });
+
+        // Actualizar estudios asignados conservando los agregados en memoria
+        setEstudiosAsignados((prev) => {
+          const codigosBackend = new Set(resp.estudios.map((e) => e.codigo));
+          const virtuales = prev.filter((e) => !codigosBackend.has(e.codigo));
+          return [...resp.estudios, ...virtuales];
         });
 
         const ahora = new Date();
@@ -261,6 +360,11 @@ export const CapturaResultadosPage: React.FC = () => {
     const valorPersistir = nuevoValor.trim() === "" ? null : nuevoValor.trim();
     valoresModificadosRef.current[codigo] = valorPersistir;
     setEstadoGuardado("modificado");
+
+    // Actualizar localmente los cálculos instantáneos
+    setEstudiosAsignados((prev) =>
+      prev.map((e) => calcularEstudioLocalmente(e, valoresActualizados))
+    );
 
     // 1. Debounce 400 ms para Vista Previa en Vivo (POST /calcular)
     if (timerCalcularRef.current) window.clearTimeout(timerCalcularRef.current);
@@ -295,6 +399,12 @@ export const CapturaResultadosPage: React.FC = () => {
       });
       setValoresForm(nuevoMapa);
 
+      setEstudiosAsignados((prev) => {
+        const codigosBackend = new Set(resp.estudios.map((e) => e.codigo));
+        const virtuales = prev.filter((e) => !codigosBackend.has(e.codigo));
+        return [...resp.estudios, ...virtuales];
+      });
+
       const ahora = new Date();
       setHoraUltimoGuardado(ahora.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
       setEstadoGuardado("guardado");
@@ -314,7 +424,7 @@ export const CapturaResultadosPage: React.FC = () => {
       e.preventDefault();
       const todosInputs = Array.from(
         document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
-          ".lis-captura-input:not([disabled])"
+          ".lis-captura-hoja-content .lis-captura-input:not([disabled])"
         )
       );
       const idx = todosInputs.indexOf(e.currentTarget as any);
@@ -336,15 +446,25 @@ export const CapturaResultadosPage: React.FC = () => {
     }
   };
 
-  // Enfocar campo pendiente al hacer clic
+  // Enfocar campo pendiente al hacer clic desde el desplegable de pendientes
   const enfocarParametro = (codigo: string) => {
     setMostrarMenuPendientes(false);
-    const el = document.getElementById(`input-${codigo}`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      el.focus();
-      if (el instanceof HTMLInputElement) el.select();
+    // Buscar en qué estudio se encuentra el parámetro y cambiar la pestaña activa si es necesario
+    const estudioContenedor = estudiosAsignados.find((est) =>
+      est.secciones.some((sec) => sec.parametros.some((p) => p.codigo === codigo))
+    );
+    if (estudioContenedor && estudioContenedor.codigo !== estudioActivoCodigo) {
+      setEstudioActivoCodigo(estudioContenedor.codigo);
     }
+
+    window.setTimeout(() => {
+      const el = document.getElementById(`input-${codigo}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.focus();
+        if (el instanceof HTMLInputElement) el.select();
+      }
+    }, 100);
   };
 
   // Formatear valor numérico para la visualización
@@ -419,6 +539,60 @@ export const CapturaResultadosPage: React.FC = () => {
     return { completos, total };
   };
 
+  // Acción dinámica: Añadir estudio del catálogo a la orden en memoria
+  const handleAnadirEstudioAOrden = (codigo: string, nombreEstudio: string) => {
+    const sexoPac = ordenDetalle?.paciente?.sexo || captura?.orden?.paciente?.sexo || "M";
+    const nuevoEstudio = generarEstudioCapturaPlantilla(codigo, nombreEstudio, sexoPac);
+
+    // Si tiene valores por defecto, agregarlos a valoresForm
+    const nuevosValores = { ...valoresForm };
+    nuevoEstudio.secciones.forEach((sec) => {
+      sec.parametros.forEach((p) => {
+        if (p.valor !== null && p.valor !== undefined) {
+          nuevosValores[p.codigo] = p.valor;
+        }
+      });
+    });
+    setValoresForm(nuevosValores);
+
+    // Agregar a la lista de estudios asignados al final de la cola
+    setEstudiosAsignados((prev) => [...prev, nuevoEstudio]);
+
+    // Establecer como estudio activo de inmediato
+    setEstudioActivoCodigo(codigo);
+
+    // Foco en el primer campo útil
+    enfocarPrimerInputEstudioActivo();
+  };
+
+  // Navegación: Cambiar de estudio activo (guarda cambios pendientes)
+  const cambiarEstudioActivo = (codigo: string) => {
+    if (Object.keys(valoresModificadosRef.current).length > 0) {
+      ejecutarGuardado();
+    }
+    setEstudioActivoCodigo(codigo);
+    enfocarPrimerInputEstudioActivo();
+  };
+
+  // Botón [ Siguiente > ]
+  const handleSiguienteEstudio = () => {
+    const idxActual = estudiosAsignados.findIndex((e) => e.codigo === estudioActivoCodigo);
+    if (idxActual >= 0 && idxActual + 1 < estudiosAsignados.length) {
+      cambiarEstudioActivo(estudiosAsignados[idxActual + 1].codigo);
+    }
+  };
+
+  // Botón [ < Anterior ]
+  const handleAnteriorEstudio = () => {
+    const idxActual = estudiosAsignados.findIndex((e) => e.codigo === estudioActivoCodigo);
+    if (idxActual > 0) {
+      cambiarEstudioActivo(estudiosAsignados[idxActual - 1].codigo);
+    } else if (idxActual === -1 && estudiosAsignados.length > 0) {
+      // Si estaba en un estudio no asignado, regresa al último asignado
+      cambiarEstudioActivo(estudiosAsignados[estudiosAsignados.length - 1].codigo);
+    }
+  };
+
   if (cargando) {
     return (
       <div className="lis-page-container">
@@ -443,7 +617,7 @@ export const CapturaResultadosPage: React.FC = () => {
     );
   }
 
-  const { orden, estudios, completitud } = captura;
+  const { orden, completitud } = captura;
 
   // Datos del paciente y orden formateados
   const nombrePaciente = ordenDetalle
@@ -470,6 +644,25 @@ export const CapturaResultadosPage: React.FC = () => {
         minute: "2-digit",
       })
     : "Sin registro de hora";
+
+  // Identificar estudios asignados y no asignados del catálogo
+  const codigosAsignados = new Set(estudiosAsignados.map((e) => e.codigo));
+  const estudiosNoAsignadosCatalogo = catalogoEstudios.filter(
+    (cat) => !codigosAsignados.has(cat.codigo)
+  );
+
+  // Estudio activo asignado (si aplica)
+  const estudioActivo = estudiosAsignados.find((e) => e.codigo === estudioActivoCodigo);
+
+  // Estudio activo no asignado (si se seleccionó una pestaña no asignada)
+  const estudioCatalogoNoAsignado = !estudioActivo
+    ? catalogoEstudios.find((c) => c.codigo === estudioActivoCodigo)
+    : null;
+
+  // Índices para paginador
+  const idxAsignadoActual = estudiosAsignados.findIndex((e) => e.codigo === estudioActivoCodigo);
+  const puedeAnterior = idxAsignadoActual > 0 || (idxAsignadoActual === -1 && estudiosAsignados.length > 0);
+  const puedeSiguiente = idxAsignadoActual >= 0 && idxAsignadoActual + 1 < estudiosAsignados.length;
 
   // Renderizar fila doble de diferencial (% editable y mm3 calculado)
   const renderizarFilaDiferencial = (pctParam: ParametroCaptura, absParam?: ParametroCaptura) => {
@@ -612,7 +805,7 @@ export const CapturaResultadosPage: React.FC = () => {
     );
   };
 
-  // Renderizar sección de parámetros (agrupación analítica)
+  // Renderizar sección analítica
   const renderizarSeccion = (sec: SeccionCaptura) => {
     const esDiferencial = sec.grupo === "DIFERENCIAL";
 
@@ -825,49 +1018,212 @@ export const CapturaResultadosPage: React.FC = () => {
         }}
       >
         <div className="lis-captura-layout">
-          {/* Izquierda (≈ 55 %) — Hoja de Captura Fiel al Excel */}
+          {/* Columna Izquierda (≈ 55 %) — Modo Enfocado con Barra de Navegación Inferior */}
           <div className="lis-captura-hoja">
-            <div className="lis-captura-hoja-grid">
-              {estudios.map((estudio) => {
-                const conteo = calcularConteoEstudio(estudio);
-                return (
-                  <div key={estudio.codigo} className="lis-captura-estudio-box">
-                    {/* Encabezado del estudio (ej. Hemograma 9/12) */}
-                    <div className="lis-captura-estudio-header">
-                      <span>{estudio.nombre}</span>
-                      <span className="lis-chip" style={{ fontSize: "11px", padding: "1px 6px" }}>
-                        {conteo.completos}/{conteo.total}
-                      </span>
-                    </div>
-
-                    {/* Validaciones de reglas cruzadas del estudio si aplican */}
-                    {estudio.validaciones && estudio.validaciones.length > 0 && (
-                      <div style={{ padding: "4px 8px", display: "flex", flexDirection: "column", gap: "4px" }}>
-                        {estudio.validaciones.map((val, idx) => (
-                          <div
-                            key={idx}
-                            className={`lis-alert ${
-                              val.severidad === "ERROR" ? "lis-alert-error" : "lis-alert-warning"
-                            }`}
-                            style={{ padding: "4px 8px", margin: 0, fontSize: "12px" }}
+            {/* Área de Trabajo: Muestra ÚNICAMENTE el formulario del estudio activo */}
+            <div className="lis-captura-hoja-content">
+              {estudioActivo ? (
+                <div key={estudioActivo.codigo} className="lis-captura-estudio-box">
+                  {/* Encabezado del estudio enfocado */}
+                  {(() => {
+                    const conteo = calcularConteoEstudio(estudioActivo);
+                    const idx = estudiosAsignados.findIndex((e) => e.codigo === estudioActivo.codigo);
+                    return (
+                      <div className="lis-captura-estudio-header">
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{ fontSize: "14px", fontWeight: 700 }}>
+                            {idx + 1}. {estudioActivo.nombre}
+                          </span>
+                          <span
+                            className="lis-chip"
+                            style={{ fontSize: "11px", padding: "1px 6px", backgroundColor: "#e2e8f0" }}
                           >
-                            <strong>{val.severidad === "ERROR" ? "[Error]" : "[Advertencia]"}</strong> {val.mensaje}
-                          </div>
-                        ))}
+                            Estudio {idx + 1} de {estudiosAsignados.length}
+                          </span>
+                        </div>
+                        <span
+                          className="lis-chip"
+                          style={{
+                            fontSize: "11px",
+                            padding: "1px 6px",
+                            backgroundColor:
+                              conteo.completos === conteo.total && conteo.total > 0
+                                ? "var(--success-bg, #dcfce7)"
+                                : "#f1f5f9",
+                            color:
+                              conteo.completos === conteo.total && conteo.total > 0
+                                ? "var(--success)"
+                                : "inherit",
+                          }}
+                        >
+                          {conteo.completos}/{conteo.total} completados
+                        </span>
                       </div>
-                    )}
+                    );
+                  })()}
 
-                    {/* Secciones y tabla del estudio */}
-                    <div style={{ padding: "6px" }}>
-                      {estudio.secciones.map((sec) => renderizarSeccion(sec))}
+                  {/* Validaciones de reglas cruzadas del estudio si aplican */}
+                  {estudioActivo.validaciones && estudioActivo.validaciones.length > 0 && (
+                    <div style={{ padding: "4px 8px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                      {estudioActivo.validaciones.map((val, idx) => (
+                        <div
+                          key={idx}
+                          className={`lis-alert ${
+                            val.severidad === "ERROR" ? "lis-alert-error" : "lis-alert-warning"
+                          }`}
+                          style={{ padding: "4px 8px", margin: 0, fontSize: "12px" }}
+                        >
+                          <strong>{val.severidad === "ERROR" ? "[Error]" : "[Advertencia]"}</strong> {val.mensaje}
+                        </div>
+                      ))}
                     </div>
+                  )}
+
+                  {/* Secciones y tabla de captura del estudio activo */}
+                  <div style={{ padding: "6px" }}>
+                    {estudioActivo.secciones.map((sec) => renderizarSeccion(sec))}
                   </div>
-                );
-              })}
+                </div>
+              ) : estudioCatalogoNoAsignado ? (
+                /* Vista contextual cuando se hace clic en una pestaña de estudio NO asignado */
+                <div className="lis-unassigned-card">
+                  <div className="lis-unassigned-banner">
+                    <div>
+                      <div style={{ fontSize: "12px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: 700 }}>
+                        Estudio del catálogo no asignado
+                      </div>
+                      <h3 style={{ margin: "2px 0 4px 0", fontSize: "16px", color: "var(--text-main)" }}>
+                        {estudioCatalogoNoAsignado.nombre}
+                      </h3>
+                      <div style={{ fontSize: "12.5px", color: "var(--text-muted)" }}>
+                        Categoría: <strong>{estudioCatalogoNoAsignado.categoria}</strong>
+                      </div>
+                    </div>
+
+                    {!esAdmin && (
+                      <button
+                        type="button"
+                        className="lis-btn lis-btn-primary"
+                        onClick={() =>
+                          handleAnadirEstudioAOrden(
+                            estudioCatalogoNoAsignado.codigo,
+                            estudioCatalogoNoAsignado.nombre
+                          )
+                        }
+                        title="Incorporar este estudio a la orden actual del paciente"
+                        style={{ padding: "6px 16px", fontWeight: 700 }}
+                      >
+                        + Añadir estudio a esta orden
+                      </button>
+                    )}
+                  </div>
+
+                  <div style={{ fontSize: "13px", color: "var(--text-main)" }}>
+                    <p style={{ margin: "0 0 8px 0" }}>
+                      Este estudio no forma parte de la solicitud inicial de este paciente. Si desea registrar resultados analíticos para este estudio, pulse el botón <strong>Añadir estudio a esta orden</strong>.
+                    </p>
+                    <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "12px" }}>
+                      Al añadirlo, se activará su hoja de captura en esta pantalla y se incorporará en tiempo real al informe previo del panel derecho.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ padding: "20px", textAlign: "center", color: "var(--text-muted)" }}>
+                  Seleccione un estudio de la barra inferior para capturar resultados.
+                </div>
+              )}
+            </div>
+
+            {/* Barra de Navegación / Paginador Inferior Fija (§3 y §4) */}
+            <div className="lis-captura-bottom-bar">
+              {/* Botón [ < Anterior ] */}
+              <button
+                type="button"
+                className="lis-captura-nav-btn"
+                onClick={handleAnteriorEstudio}
+                disabled={!puedeAnterior}
+                title="Regresar al estudio asignado previo"
+              >
+                ← Anterior
+              </button>
+
+              {/* Contenedor con Scroll Horizontal de Pestañas / Chips Numerados */}
+              <div className="lis-captura-tabs-scroll" ref={tabsScrollRef}>
+                {/* 1. Primeros puestos: Estudios ya asignados a la orden */}
+                {estudiosAsignados.map((est, idx) => {
+                  const esActivo = est.codigo === estudioActivoCodigo;
+                  const conteo = calcularConteoEstudio(est);
+                  const estaCompleto = conteo.completos === conteo.total && conteo.total > 0;
+
+                  return (
+                    <button
+                      key={est.codigo}
+                      ref={esActivo ? activeTabRef : null}
+                      type="button"
+                      className={`lis-captura-tab is-assigned ${esActivo ? "is-active" : ""}`}
+                      onClick={() => cambiarEstudioActivo(est.codigo)}
+                      title={`Estudio asignado: ${est.nombre} (${conteo.completos}/${conteo.total})`}
+                    >
+                      <span>
+                        {idx + 1}. {est.nombre}
+                      </span>
+                      <span className="lis-tab-badge">
+                        {estaCompleto ? "✓" : `${conteo.completos}/${conteo.total}`}
+                      </span>
+                    </button>
+                  );
+                })}
+
+                {/* Separador sutil si hay estudios no asignados */}
+                {estudiosNoAsignadosCatalogo.length > 0 && (
+                  <div
+                    style={{
+                      width: "1px",
+                      height: "20px",
+                      backgroundColor: "var(--border-color)",
+                      margin: "0 2px",
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
+
+                {/* 2. Puestos finales: Estudios del catálogo no incluidos en la orden */}
+                {estudiosNoAsignadosCatalogo.map((cat, idx) => {
+                  const numero = estudiosAsignados.length + idx + 1;
+                  const esActivo = cat.codigo === estudioActivoCodigo;
+
+                  return (
+                    <button
+                      key={cat.codigo}
+                      ref={esActivo ? activeTabRef : null}
+                      type="button"
+                      className={`lis-captura-tab is-unassigned ${esActivo ? "is-active" : ""}`}
+                      onClick={() => cambiarEstudioActivo(cat.codigo)}
+                      title={`Estudio fuera de la orden: ${cat.nombre} (clic para ver y añadir)`}
+                    >
+                      <span>
+                        {numero}. {cat.nombre}
+                      </span>
+                      <span className="lis-tab-badge">+</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Botón [ Siguiente > ] */}
+              <button
+                type="button"
+                className="lis-captura-nav-btn"
+                onClick={handleSiguienteEstudio}
+                disabled={!puedeSiguiente}
+                title="Avanzar al siguiente estudio asignado de la orden"
+              >
+                Siguiente →
+              </button>
             </div>
           </div>
 
-          {/* Derecha (≈ 45 %) — Vista Previa Grande con scroll propio */}
+          {/* Columna Derecha (≈ 45 %) — Vista Previa Grande con scroll propio e intacta */}
           <div className="lis-captura-vista-previa">
             <div className={`lis-vista-previa-sheet ${vistaPreviaFullscreen ? "is-fullscreen" : ""}`}>
               {/* Barra superior de la vista previa */}
@@ -933,8 +1289,8 @@ export const CapturaResultadosPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Tablas por estudio con fuente >= 14 px */}
-              {estudios.map((estudio) => (
+              {/* Tablas por estudio con fuente >= 14 px para todos los estudios asignados */}
+              {estudiosAsignados.map((estudio) => (
                 <div
                   key={estudio.codigo}
                   style={{
@@ -975,8 +1331,11 @@ export const CapturaResultadosPage: React.FC = () => {
                             } else {
                               valorTexto = `No calculable — ${p.motivo_no_calculable || "Faltan entradas"}`;
                             }
-                          } else if (p.valor !== null && p.valor !== undefined && p.valor !== "") {
-                            valorTexto = formatearValorVisual(p.valor);
+                          } else {
+                            const valAct = valoresForm[p.codigo] !== undefined ? valoresForm[p.codigo] : p.valor;
+                            if (valAct !== null && valAct !== undefined && valAct !== "") {
+                              valorTexto = formatearValorVisual(valAct);
+                            }
                           }
 
                           return (
