@@ -1560,17 +1560,27 @@ a:focus-visible {
   .lis-captura-vista-previa {
     flex: 1 1 100% !important;
     max-width: 100% !important;
+    height: auto !important;
   }
 }
 
 .lis-captura-hoja {
   flex: 1 1 55%;
+  max-width: 55%;
   min-width: 0;
   display: flex;
   flex-direction: column;
   height: calc(100vh - 115px);
   max-height: calc(100vh - 115px);
   overflow: hidden;
+  gap: 8px;
+}
+
+.lis-captura-hoja-content {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 4px;
 }
 
 .lis-captura-estudio-scroll-area {
@@ -1745,6 +1755,190 @@ a:focus-visible {
   max-width: 480px;
   margin: 0 auto 20px auto;
   line-height: 1.5;
+}
+
+/* --- Barra Inferior de Navegación / Paginador de Estudios --- */
+.lis-captura-bottom-bar {
+  flex: 0 0 auto;
+  background-color: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 -1px 3px rgba(0, 0, 0, 0.04);
+  z-index: 10;
+}
+
+.lis-captura-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-color);
+  background-color: #ffffff;
+  color: var(--text-main);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 120ms ease;
+  flex-shrink: 0;
+}
+
+.lis-captura-nav-btn:hover:not(:disabled) {
+  background-color: #f1f5f9;
+  border-color: #cbd5e1;
+  color: var(--primary);
+}
+
+.lis-captura-nav-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.lis-captura-tabs-scroll {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  padding: 2px 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.lis-captura-tabs-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+
+.lis-captura-tabs-scroll::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 4px;
+}
+
+.lis-captura-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 120ms ease;
+  user-select: none;
+  flex-shrink: 0;
+  background-color: #ffffff;
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+}
+
+/* Estado 1: Estudio Asignado y Activo */
+.lis-captura-tab.is-assigned.is-active {
+  background-color: #0284c7;
+  color: #ffffff;
+  border-color: #0284c7;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(2, 132, 199, 0.35);
+}
+
+.lis-captura-tab.is-assigned.is-active:hover {
+  background-color: #0369a1;
+  border-color: #0369a1;
+}
+
+/* Estado 2: Estudio Asignado pero Inactivo */
+.lis-captura-tab.is-assigned:not(.is-active) {
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  font-weight: 600;
+}
+
+.lis-captura-tab.is-assigned:not(.is-active):hover {
+  background-color: #dbeafe;
+  border-color: #93c5fd;
+  color: #1e40af;
+}
+
+/* Estado 3: Estudio No Asignado (Fuera de la orden) */
+.lis-captura-tab.is-unassigned {
+  background-color: #f8fafc;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+  font-weight: 500;
+}
+
+.lis-captura-tab.is-unassigned:hover {
+  background-color: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+
+.lis-captura-tab.is-unassigned.is-active {
+  background-color: #f1f5f9;
+  color: #0f172a;
+  border: 1px solid #94a3b8;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.lis-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  line-height: 1.1;
+  font-weight: 700;
+}
+
+.lis-captura-tab.is-assigned.is-active .lis-tab-badge {
+  background-color: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.lis-captura-tab.is-assigned:not(.is-active) .lis-tab-badge {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.lis-captura-tab.is-unassigned .lis-tab-badge {
+  background-color: #e2e8f0;
+  color: #64748b;
+}
+
+/* Vista previa de Estudio No Asignado */
+.lis-unassigned-card {
+  background-color: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.lis-unassigned-banner {
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #0284c7;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .lis-captura-estudio-box {
