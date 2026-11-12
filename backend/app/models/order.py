@@ -58,6 +58,7 @@ class OrdenEstudio(Base):
     id_estudio = Column(BigInteger, ForeignKey("estudios.id_estudio"), nullable=False)
     id_estudio_version = Column(BigInteger, ForeignKey("estudio_versiones.id_estudio_version"), nullable=False)
     observaciones = Column(Text)
+    etiqueta_cayados = Column(String(80))
 
     orden = relationship("Orden", back_populates="estudios")
     estudio = relationship("Estudio")

@@ -34,6 +34,24 @@ export interface PerfilCatalogo {
   estudios: PerfilEstudioItem[];
 }
 
+export interface PerfilRapido extends PerfilCatalogo { id: number }
+
+export async function listarPerfilesRapidosApi(): Promise<PerfilRapido[]> {
+  return apiClient<PerfilRapido[]>("/api/catalogo/perfiles-rapidos", { method: "GET" });
+}
+
+export async function crearPerfilRapidoApi(payload: { nombre: string; estudios: PerfilEstudioItem[] }): Promise<PerfilRapido> {
+  return apiClient<PerfilRapido>("/api/catalogo/perfiles-rapidos", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export async function actualizarPerfilRapidoApi(id: number, payload: { nombre: string; estudios: PerfilEstudioItem[] }): Promise<PerfilRapido> {
+  return apiClient<PerfilRapido>(`/api/catalogo/perfiles-rapidos/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+}
+
+export async function eliminarPerfilRapidoApi(id: number): Promise<void> {
+  return apiClient<void>(`/api/catalogo/perfiles-rapidos/${id}`, { method: "DELETE" });
+}
+
 export async function obtenerEstudiosCatalogoApi(): Promise<EstudioCatalogo[]> {
   return apiClient<EstudioCatalogo[]>("/api/catalogo/estudios", { method: "GET" });
 }

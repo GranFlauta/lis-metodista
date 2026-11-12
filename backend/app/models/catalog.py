@@ -117,3 +117,15 @@ class PerfilEstudio(Base):
 
     perfil = relationship("Perfil", back_populates="estudios_asociados")
     estudio = relationship("Estudio")
+
+
+class PerfilRapido(Base):
+    __tablename__ = "perfiles_rapidos"
+    __table_args__ = {"schema": "laboratorio"}
+
+    id_perfil_rapido = Column(BigInteger, primary_key=True, index=True)
+    id_usuario = Column(BigInteger, ForeignKey("laboratorio.usuarios.id_usuario", ondelete="CASCADE"), nullable=False)
+    nombre = Column(String(100), nullable=False)
+    estudios = Column(JSONB, nullable=False)
+    creado_en = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    actualizado_en = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Resultados clínicos {{ folio or numero_orden or '' }}</title>
+  <style>
+    @page {
+      size: Letter portrait;
+      margin: 49mm 12mm 35mm;
+      @top-center { content: element(report-header); vertical-align: top; }
+      @bottom-center { content: element(report-footer); vertical-align: top; padding-top: 5mm; }
+      @bottom-right {
+        content: "Página " counter(page) " de " counter(pages);
+        width: 29mm;
+        font: 7.5pt "DejaVu Sans", sans-serif;
+        color: #475569;
+        vertical-align: top;
+        padding-top: 5.6mm;
+        text-align: right;
+        white-space: nowrap;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; color: #172033; font: 9pt "DejaVu Sans", Arial, sans-serif; line-height: 1.35; }
+    .running-header { position: running(report-header); width: 100%; height: 34mm; padding-top: 1mm; background: url("membrete-superior.svg") center / 100% 100% no-repeat; }
+    .header-content { display: table; width: 100%; height: 25mm; table-layout: fixed; padding: 1mm 2mm 0; }
+    .header-brand, .institution { display: table-cell; vertical-align: middle; }
+    .header-brand-lab { width: 35mm; text-align: left; }
+    .header-brand-hospital { width: 28mm; padding-right: 9mm; text-align: center; }
+    .logo-labmet { width: 30mm; height: 23mm; object-fit: contain; }
+    .logo-metodista { width: 18mm; height: 20mm; object-fit: contain; }
+    .institution { text-align: center; line-height: 1.12; }
+    .institution .lab-title { color: #a51c27; font-size: 13pt; font-weight: 800; letter-spacing: .035em; white-space: nowrap; }
+    .institution .hospital { font-size: 9.5pt; font-weight: 700; }
+    .institution .church { font-size: 7pt; color: #475569; }
+    .running-footer { position: running(report-footer); height: 18mm; width: 100%; padding: 2mm 1mm 0; text-align: center; color: #475569; font-size: 7pt; background: url("membrete-inferior.svg") center / 100% 100% no-repeat; }
+    .footer-contact { position: relative; margin-right: 31mm; padding-top: 2mm; border-top: .25mm solid #b51620; line-height: 1.45; }
+    .footer-contact span { display: block; }
+    .footer-contact strong { color: #a51c27; }
+    .watermark { position: fixed; z-index: -10; top: 45mm; left: 30mm; width: 155mm; height: 155mm; object-fit: contain; opacity: .065; }
+    .institution-watermark { position: fixed; z-index: -11; top: 61mm; left: 51mm; width: 112mm; height: 112mm; object-fit: contain; opacity: .055; }
+    .watermark-pending { position: fixed; z-index: -9; top: 78mm; left: 24mm; width: 168mm; height: 58mm; object-fit: contain; opacity: .72; }
+    .document-meta { display: flex; align-items: start; justify-content: space-between; gap: 8mm; border-bottom: .4mm solid #a51c27; padding: 0 0 2mm; margin-bottom: 3mm; }
+    .document-meta h1 { margin: 0; color: #a51c27; font-size: 15pt; letter-spacing: .04em; }
+    .folio { font: 700 10pt "DejaVu Sans Mono", monospace; text-align: right; }
+    .folio small { display: block; color: #64748b; font: 7.5pt "DejaVu Sans", sans-serif; margin-top: 1mm; }
+    .patient-grid { display: grid; grid-template-columns: 1.4fr .85fr 1fr; gap: 2mm 5mm; background: #f8fafc; border: .25mm solid #d7dde5; padding: 3mm 4mm; margin-bottom: 4mm; }
+    .patient-item { min-width: 0; overflow-wrap: anywhere; }
+    .label { display: block; color: #64748b; font-size: 7pt; font-weight: 600; text-transform: uppercase; letter-spacing: .025em; }
+    .value { font-weight: 650; }
+    .study { margin: 0 0 4mm; }
+    .study-title { margin: 0 0 1.5mm; padding: 1.7mm 2.5mm; background: #f1f5f9; border-left: 1.1mm solid #a51c27; color: #182230; font-size: 10pt; font-weight: 750; text-transform: uppercase; break-after: avoid; page-break-after: avoid; }
+    .section-title { margin: 1.5mm 0 1mm; padding: 1mm 1.5mm; background: #f8fafc; border-bottom: .2mm solid #d7dde5; font-size: 8pt; font-weight: 700; color: #475569; text-transform: uppercase; break-after: avoid; page-break-after: avoid; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 8pt; }
+    thead { display: table-header-group; }
+    th { background: #e9edf2; border: .2mm solid #cbd5e1; padding: 1.3mm 1.6mm; color: #334155; font-size: 7.4pt; text-align: left; }
+    td { border: .2mm solid #d6dce4; padding: 1.25mm 1.6mm; vertical-align: middle; overflow-wrap: anywhere; }
+    tbody tr:nth-child(even) { background: #fafbfc; }
+    tr { break-inside: avoid; page-break-inside: avoid; }
+    td.numeric { text-align: right; font-variant-numeric: tabular-nums; }
+    .hemograma .name { width: 24%; }
+    .hemograma .relative { width: 13%; }
+    .hemograma .absolute { width: 16%; }
+    .hemograma .reference { width: 25%; }
+    .hemograma .flag { width: 12%; text-align: center; }
+    .normal { color: #166534; font-weight: 600; }
+    .alto { color: #991b1b; font-weight: 700; }
+    .bajo { color: #1e40af; font-weight: 700; }
+    .differential-total { margin: 1.5mm 0 3mm; padding: 1.5mm 2mm; border-top: .2mm solid #cbd5e1; text-align: right; color: #334155; font-size: 7.5pt; }
+    .note { margin: 1.5mm 0 0; padding: 2mm 2.5mm; border-left: .8mm solid #d6a72c; background: #fffbeb; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .conclusion { margin-top: 4mm; padding: 3mm; border: .25mm solid #cbd5e1; background: #f8fafc; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .signoff { margin-top: 8mm; display: grid; grid-template-columns: 1fr 1fr; gap: 12mm; break-inside: avoid; page-break-inside: avoid; }
+    .signature { padding-top: 12mm; border-top: .25mm solid #334155; text-align: center; }
+    .signature strong { display: block; }
+    .hash { color: #64748b; font: 6.5pt "DejaVu Sans Mono", monospace; overflow-wrap: anywhere; }
+    .draft-stamp { color: #a51c27; text-align: center; font-size: 8pt; font-weight: 700; margin-top: 2mm; }
+  </style>
+</head>
+<body>
+  <img class="watermark" src="logo-labmet.png" alt="">
+  <img class="institution-watermark" src="marca-agua-institucional.svg" alt="">
+  {% if not aprobado %}<img class="watermark-pending" src="marca-agua-no-aprobado.svg" alt="">{% endif %}
+  <header class="running-header">
+    <div class="header-content">
+      <div class="header-brand header-brand-lab"><img class="logo-labmet" src="logo-labmet.png" alt="LABMET"></div>
+      <div class="institution">
+        <div class="lab-title">LABORATORIO CLÍNICO</div>
+        <div class="hospital">Hospital Metodista</div>
+        <div class="church">Iglesia Evangélica Metodista en Bolivia</div>
+      </div>
+      <div class="header-brand header-brand-hospital"><img class="logo-metodista" src="logo-metodista.svg" alt="Hospital Metodista"></div>
+    </div>
+  </header>
+
+  <footer class="running-footer">
+    <div class="footer-contact"><strong>Hospital Metodista</strong> · 14 de Septiembre N.º 5809 · Calle 12, Obrajes<span>Tel. 2 783371 · 2 783509 · 2 783510 · Emergencias 73258212</span></div>
+  </footer>
+
+  <main>
+    <div class="document-meta">
+      <div><h1>Resultados de laboratorio</h1>{% if not aprobado %}<div class="draft-stamp">DOCUMENTO PRELIMINAR · NO APROBADO</div>{% endif %}</div>
+      <div class="folio">{% if folio %}FOLIO: {{ folio }}{% else %}ORDEN: {{ numero_orden or orden.id_orden }}{% endif %}<small>{% if folio %}Versión V{{ numero_version }} · {{ publicado_en }}{% else %}Vista previa{% endif %}</small></div>
+    </div>
+
+    <section class="patient-grid">
+      <div class="patient-item"><span class="label">Paciente</span><span class="value">{{ paciente.nombre_completo }}</span></div>
+      {% if paciente.ci %}<div class="patient-item"><span class="label">C.I.</span><span class="value">{{ paciente.ci }}</span></div>{% endif %}
+      <div class="patient-item"><span class="label">Sexo / Edad</span><span class="value">{{ paciente.sexo_texto }}{% if paciente.edad %} / {{ paciente.edad }}{% endif %}</span></div>
+      {% if orden.fecha_hora_toma_muestra %}<div class="patient-item"><span class="label">Toma de muestra</span><span class="value">{{ orden.fecha_hora_toma_muestra }}</span></div>{% endif %}
+      {% if orden.medico_solicitante %}<div class="patient-item"><span class="label">Médico solicitante</span><span class="value">{{ orden.medico_solicitante }}</span></div>{% endif %}
+      {% if orden.pieza %}<div class="patient-item"><span class="label">Pieza</span><span class="value">{{ orden.pieza }}</span></div>{% endif %}
+      {% if firmante.nombre_completo %}<div class="patient-item"><span class="label">Bioquímico responsable</span><span class="value">{{ firmante.nombre_completo }}{% if firmante.matricula %} · Mat. {{ firmante.matricula }}{% endif %}</span></div>{% endif %}
+    </section>
+
+    {% for estudio in estudios %}
+    <section class="study">
+      <h2 class="study-title">{{ estudio.nombre }}</h2>
+      {% for seccion in estudio.secciones %}
+        {% if seccion.grupo and seccion.grupo not in ["GENERAL", "DIFERENCIAL"] %}<h3 class="section-title">{{ seccion.grupo.replace('_', ' ') }}</h3>{% endif %}
+        {% if estudio.codigo == "HEMOGRAMA" and seccion.grupo == "DIFERENCIAL" %}
+        <table class="hemograma">
+          <thead><tr><th class="name">Parámetro</th><th class="relative">Relativo</th><th class="absolute">Absoluto</th><th class="reference">Valor de referencia</th><th class="flag">Bandera</th></tr></thead>
+          <tbody>{% for row in seccion.filas %}<tr>
+            <td>{{ row.nombre }}</td><td class="numeric">{{ row.relativo }}{% if row.relativo and not row.relativo.endswith('%') %} %{% endif %}</td><td class="numeric">{{ row.absoluto or '—' }}{% if row.absoluto and not row.absoluto.endswith('mm3') and not row.absoluto.endswith('mm³') %} mm³{% endif %}</td><td>{{ row.referencia or '—' }}</td>
+            <td class="flag {% if row.bandera == 'ALTO' %}alto{% elif row.bandera == 'BAJO' %}bajo{% elif row.bandera == 'NORMAL' %}normal{% endif %}">{% if row.bandera == 'ALTO' %}▲ Alto{% elif row.bandera == 'BAJO' %}▼ Bajo{% elif row.bandera == 'NORMAL' %}Normal{% endif %}</td>
+          </tr>{% endfor %}</tbody>
+        </table>
+        {% if seccion.suma_diferencial is not none %}<div class="differential-total"><strong>Suma del diferencial:</strong> {{ seccion.suma_diferencial }} %</div>{% endif %}
+        {% else %}
+        <table>
+          <thead><tr><th style="width:34%">Parámetro</th><th style="width:24%;text-align:right">Resultado</th><th style="width:13%">Unidad</th><th style="width:20%">Valor de referencia</th><th style="width:9%;text-align:center">Bandera</th></tr></thead>
+          <tbody>{% for row in seccion.filas %}<tr>
+            <td>{{ row.nombre }}</td><td class="numeric">{{ row.valor }}</td><td>{{ row.unidad }}</td><td>{{ row.referencia or '—' }}</td>
+            <td class="flag {% if row.bandera == 'ALTO' %}alto{% elif row.bandera == 'BAJO' %}bajo{% elif row.bandera == 'NORMAL' %}normal{% endif %}">{% if row.bandera == 'ALTO' %}▲ Alto{% elif row.bandera == 'BAJO' %}▼ Bajo{% elif row.bandera == 'NORMAL' %}Normal{% endif %}</td>
+          </tr>{% endfor %}</tbody>
+        </table>
+        {% endif %}
+      {% endfor %}
+      {% if estudio.observaciones %}<div class="note"><strong>Nota del estudio:</strong> {{ estudio.observaciones }}</div>{% endif %}
+    </section>
+    {% endfor %}
+
+    {% if orden.observaciones %}<section class="conclusion"><strong>OBSERVACIONES CLÍNICAS Y CONCLUSIONES</strong><br>{{ orden.observaciones }}</section>{% endif %}
+    {% if aprobado %}<section class="signoff"><div><span class="hash">Verificación del snapshot SHA-256:<br>{{ snapshot_sha256 }}</span></div><div class="signature"><strong>{{ firmante.nombre_completo }}</strong>Bioquímico responsable · Mat. {{ firmante.matricula or 'S/M' }}</div></section>{% endif %}
+  </main>
+</body>
+</html>

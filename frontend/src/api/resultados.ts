@@ -77,6 +77,7 @@ export interface EstudioCaptura {
   codigo: string;
   nombre: string;
   observaciones?: string | null;
+  etiqueta_cayados?: string | null;
   grupos_seleccionados: string[] | null;
   secciones: SeccionCaptura[];
   validaciones: ValidacionEstudio[];
@@ -124,6 +125,23 @@ export async function calcularResultadosApi(
   });
 }
 
+export async function generarVistaPreviaPdfApi(
+  idOrden: number,
+  payload: {
+    valores: Record<string, string>;
+    rangos_override?: Record<string, RangoOverrideItem>;
+    observaciones_estudios?: Record<string, string | null>;
+    observaciones_orden?: string | null;
+    etiqueta_cayados?: string;
+  },
+): Promise<Blob> {
+  return apiClient<Blob>(`/api/ordenes/${idOrden}/vista-previa.pdf`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    responseType: "blob",
+  });
+}
+
 /**
  * Persistencia parcial de cambios y recálculo integral de calculados.
  * Clave ausente = sin cambio; null = borrar fila.
@@ -133,7 +151,8 @@ export async function guardarResultadosApi(
   valores: Record<string, string | null>,
   rangos_override?: Record<string, RangoOverrideItem>,
   observaciones_estudios?: Record<string, string | null>,
-  observaciones_orden?: string | null
+  observaciones_orden?: string | null,
+  etiquetas_estudios?: Record<string, string | null>
 ): Promise<CapturaOrdenResponse> {
   return apiClient<CapturaOrdenResponse>(`/api/ordenes/${id}/resultados`, {
     method: "PUT",
@@ -143,6 +162,7 @@ export async function guardarResultadosApi(
       rangos_override,
       observaciones_estudios,
       observaciones_orden,
+      etiquetas_estudios,
     }),
   });
 }

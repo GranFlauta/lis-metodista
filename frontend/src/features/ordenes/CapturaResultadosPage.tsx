@@ -25,6 +25,7 @@ import {
   guardarResultadosApi,
   confirmarDefectosApi,
   getConfiguracionLaboratorioApi,
+  generarVistaPreviaPdfApi,
   CapturaOrdenResponse,
   EstudioCaptura,
   SeccionCaptura,
@@ -50,11 +51,23 @@ import {
   calcularEstudioLocalmente,
 } from "./catalogoEstudiosPlantillas";
 import { formatearResultadoClinico, formatearMilesEntero } from "../../utils/formatoNumerico";
+import { formatoResultadoInmunoserologia } from "../../utils/formatoResultadoInmunoserologia";
 import {
   ModalEditarRango,
   ModalSeleccionarInmunosero,
 } from "./ModalCapturaHelpers";
 import { publicarOrden } from "../../api/informes";
+
+type EstadoTitulacion = {
+  reactividad: string;
+  dilucion: string;
+  otra: string;
+  lote?: string;
+  vencimiento?: string;
+  controlPositivo?: string;
+  controlNegativo?: string;
+  usado: boolean;
+};
 
 export const CapturaResultadosPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -90,6 +103,7 @@ export const CapturaResultadosPage: React.FC = () => {
 
   // Valores locales en los inputs (código -> valor string)
   const [valoresForm, setValoresForm] = useState<Record<string, string>>({});
+  const [etiquetaCayados, setEtiquetaCayados] = useState("Cayados");
 
   // Valores modificados pendientes de persistir (código -> valor string o null)
   const valoresModificadosRef = useRef<Record<string, string | null>>({});
@@ -97,6 +111,7 @@ export const CapturaResultadosPage: React.FC = () => {
   // Observaciones por estudio y generales de la orden
   const [observacionesEstudios, setObservacionesEstudios] = useState<Record<string, string>>({});
   const observacionesEstudiosRef = useRef<Record<string, string | null>>({});
+  const etiquetasEstudiosRef = useRef<Record<string, string | null>>({});
   const [observacionesOrden, setObservacionesOrden] = useState<string>("");
   const observacionesOrdenRef = useRef<string | null>(null);
 
@@ -123,9 +138,19 @@ export const CapturaResultadosPage: React.FC = () => {
   const [pcrCustomVref, setPcrCustomVref] = useState<string>("< 6 mg/L");
   const [pcrDilucion, setPcrDilucion] = useState<string>("1/8");
   const [pcrCustomDilucion, setPcrCustomDilucion] = useState<string>("1/128");
+  const [titulaciones, setTitulaciones] = useState<Record<"ASTO" | "FR", EstadoTitulacion>>({
+    ASTO: { reactividad: "No reactivo", dilucion: "", otra: "", usado: false },
+    FR: { reactividad: "No reactivo", dilucion: "", otra: "", lote: "", vencimiento: "", controlPositivo: "Conforme", controlNegativo: "Conforme", usado: false },
+  });
 
   // Estado para el visor PDF interactivo a pantalla completa
   const [zoomPdf, setZoomPdf] = useState<number>(1.0);
+  const [urlPdf, setUrlPdf] = useState<string | null>(null);
+  const [cargandoPdf, setCargandoPdf] = useState(false);
+  const [errorPdf, setErrorPdf] = useState<string | null>(null);
+  const secuenciaPdfRef = useRef(0);
+  const pdfInicialSolicitadoRef = useRef(false);
+  const framePdfRef = useRef<HTMLIFrameElement | null>(null);
 
   // Estados para Publicación Oficial (Fase 4)
   const [modalPublicarAbierto, setModalPublicarAbierto] = useState<boolean>(false);
@@ -184,6 +209,8 @@ export const CapturaResultadosPage: React.FC = () => {
         setOrdenDetalle(respDetalle);
         setCatalogoEstudios(respCatalogo);
         setEstudiosAsignados(respCaptura.estudios);
+        const etiquetaCayadosInicial = respCaptura.estudios.find((est) => est.codigo === "HEMOGRAMA")?.etiqueta_cayados;
+        setEtiquetaCayados(etiquetaCayadosInicial || "Cayados");
 
         // Registrar qué parámetros existen en la orden en el backend
         const backendParams = new Set<string>();
@@ -235,6 +262,31 @@ export const CapturaResultadosPage: React.FC = () => {
         });
 
         setValoresForm(mapaInicial);
+        const valorGuardado = (codigo: string) => respCaptura.estudios.flatMap((est) => est.secciones.flatMap((sec) => sec.parametros)).find((p) => p.codigo === codigo)?.valor || "";
+        const restaurarTitulacion = (tipo: "ASTO" | "FR", codigo: string) => {
+          const raw = valorGuardado(codigo);
+          if (!raw) return null;
+          const reactivo = raw.startsWith("Reactivo");
+          const dilution = raw.match(/Reactivo\s+(\d+\/\d+)/)?.[1] || "";
+          const opcionesDilucion = ["1/2", "1/4", "1/8", "1/16", "1/32", "1/64"];
+          const esOtraDilucion = Boolean(dilution && !opcionesDilucion.includes(dilution));
+          return {
+            reactividad: reactivo ? "Reactivo" : "No reactivo",
+            dilucion: esOtraDilucion ? "OTRA" : dilution,
+            otra: dilution,
+            ...(tipo === "FR" ? {
+              lote: raw.match(/lote ([^;]+)/)?.[1] === "—" ? "" : raw.match(/lote ([^;]+)/)?.[1] || "",
+              vencimiento: raw.match(/vence ([^;]+)/)?.[1] === "—" ? "" : raw.match(/vence ([^;]+)/)?.[1] || "",
+              controlPositivo: raw.match(/controles \+ ([^,]+)/)?.[1] || "Conforme",
+              controlNegativo: raw.match(/− ([^;]+)/)?.[1] || "Conforme",
+            } : {}),
+            usado: true,
+          };
+        };
+        setTitulaciones((prev) => ({
+          ASTO: restaurarTitulacion("ASTO", "ASTO_DILUCION") || prev.ASTO,
+          FR: restaurarTitulacion("FR", "FR_DILUCION") || prev.FR,
+        }));
         setRangosOverride(overridesIniciales);
         rangosOverrideRef.current = overridesIniciales;
 
@@ -363,8 +415,9 @@ export const CapturaResultadosPage: React.FC = () => {
       const hayOverrides = Object.keys(rangosOverrideRef.current).length > 0;
       const hayObsEstudios = Object.keys(observacionesEstudiosRef.current).length > 0;
       const hayObsOrden = observacionesOrdenRef.current !== null;
+      const hayEtiquetas = Object.keys(etiquetasEstudiosRef.current).length > 0;
 
-      if (!hayCambiosValores && !hayOverrides && !hayObsEstudios && !hayObsOrden) return;
+      if (!hayCambiosValores && !hayOverrides && !hayObsEstudios && !hayObsOrden && !hayEtiquetas) return;
 
       const cambiosBackend: Record<string, string | null> = {};
       Object.keys(cambios).forEach((k) => {
@@ -372,6 +425,12 @@ export const CapturaResultadosPage: React.FC = () => {
           cambiosBackend[k] = cambios[k];
         }
       });
+
+      if (titulaciones.FR.usado && (titulaciones.FR.controlPositivo !== "Conforme" || titulaciones.FR.controlNegativo !== "Conforme")) {
+        setEstadoGuardado("error");
+        setErrorGuardadoMensaje("No se puede guardar Factor Reumatoideo: ambos controles deben estar conformes.");
+        return;
+      }
 
       setEstadoGuardado("guardando");
       setErrorGuardadoMensaje(null);
@@ -382,16 +441,19 @@ export const CapturaResultadosPage: React.FC = () => {
           cambiosBackend,
           hayOverrides ? rangosOverrideRef.current : undefined,
           hayObsEstudios ? observacionesEstudiosRef.current : undefined,
-          hayObsOrden ? observacionesOrdenRef.current : undefined
+          hayObsOrden ? observacionesOrdenRef.current : undefined,
+          hayEtiquetas ? etiquetasEstudiosRef.current : undefined
         );
         setCaptura(resp);
         setEstudiosAsignados(resp.estudios);
+        setEtiquetaCayados(resp.estudios.find((est) => est.codigo === "HEMOGRAMA")?.etiqueta_cayados || "Cayados");
 
         Object.keys(cambiosBackend).forEach((k) => {
           delete valoresModificadosRef.current[k];
         });
         observacionesOrdenRef.current = null;
         observacionesEstudiosRef.current = {};
+        etiquetasEstudiosRef.current = {};
 
         const ahora = new Date();
         const horaStr = ahora.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -406,7 +468,7 @@ export const CapturaResultadosPage: React.FC = () => {
         }
       }
     },
-    [esAdmin, ordenId]
+    [esAdmin, ordenId, titulaciones]
   );
 
   // Manejar cambio en un campo de entrada
@@ -434,6 +496,16 @@ export const CapturaResultadosPage: React.FC = () => {
     timerGuardarRef.current = window.setTimeout(() => {
       ejecutarGuardado();
     }, 1500);
+  };
+
+  const manejarCambioEtiquetaCayados = (nuevoValor: string) => {
+    if (esAdmin) return;
+    const etiqueta = nuevoValor.slice(0, 80);
+    setEtiquetaCayados(etiqueta);
+    etiquetasEstudiosRef.current.HEMOGRAMA = etiqueta.trim() || null;
+    setEstadoGuardado("modificado");
+    if (timerGuardarRef.current) window.clearTimeout(timerGuardarRef.current);
+    timerGuardarRef.current = window.setTimeout(() => ejecutarGuardado(), 1500);
   };
 
   // Confirmar valores por defecto virtuales (POST /confirmar-defectos)
@@ -594,6 +666,72 @@ export const CapturaResultadosPage: React.FC = () => {
     const { resultado, vrefTexto } = calcularResultadoPcr(reactividad, reactivo, dilucion, customDil, customVref);
     manejarCambioCampo("PCR_DILUCION", resultado);
     handleGuardarRangoOverride("PCR_DILUCION", "", "", vrefTexto);
+  };
+
+  const actualizarVistaPreviaPdf = useCallback(async () => {
+    if (!ordenId || esAdmin) return;
+    const secuencia = ++secuenciaPdfRef.current;
+    setCargandoPdf(true);
+    setErrorPdf(null);
+    try {
+      const blob = await generarVistaPreviaPdfApi(ordenId, {
+        valores: valoresForm,
+        rangos_override: rangosOverride,
+        observaciones_estudios: observacionesEstudios,
+        observaciones_orden: observacionesOrden,
+        etiqueta_cayados: etiquetaCayados,
+      });
+      if (secuencia !== secuenciaPdfRef.current) return;
+      const nextUrl = URL.createObjectURL(blob);
+      setUrlPdf((previous) => {
+        if (previous) URL.revokeObjectURL(previous);
+        return nextUrl;
+      });
+    } catch (err) {
+      if (secuencia !== secuenciaPdfRef.current) return;
+      setErrorPdf(err instanceof ApiError ? err.message : "No se pudo generar la vista previa PDF.");
+    } finally {
+      if (secuencia === secuenciaPdfRef.current) setCargandoPdf(false);
+    }
+  }, [ordenId, esAdmin, valoresForm, rangosOverride, observacionesEstudios, observacionesOrden, etiquetaCayados]);
+
+  useEffect(() => () => {
+    if (urlPdf) URL.revokeObjectURL(urlPdf);
+  }, [urlPdf]);
+
+  useEffect(() => {
+    if (!cargando && captura && !pdfInicialSolicitadoRef.current && !esAdmin) {
+      pdfInicialSolicitadoRef.current = true;
+      void actualizarVistaPreviaPdf();
+    }
+  }, [cargando, captura, esAdmin, actualizarVistaPreviaPdf]);
+
+  const actualizarTitulacion = (tipo: "ASTO" | "FR", cambios: Partial<EstadoTitulacion>) => {
+    const actual = titulaciones[tipo];
+    const nuevo = { ...actual, ...cambios, usado: true };
+    setTitulaciones((prev) => ({ ...prev, [tipo]: nuevo }));
+    const sensibilidad = tipo === "ASTO" ? 200 : 8;
+    const unidad = "UI/mL";
+    let resultado = `< ${sensibilidad} ${unidad}`;
+    let detalle = "No reactivo";
+    if (nuevo.reactividad === "Reactivo") {
+      if (!nuevo.dilucion) {
+        resultado = `≥ ${sensibilidad} ${unidad}`;
+        detalle = "Reactivo sin dilución";
+      } else {
+        const textoDilucion = nuevo.dilucion === "OTRA" ? nuevo.otra.trim() : nuevo.dilucion;
+        const factorMatch = textoDilucion.match(/^(?:1\s*\/\s*)?(\d+(?:[.,]\d+)?)$/);
+        const factor = Number(factorMatch?.[1]?.replace(",", ".") || 0);
+        resultado = factor > 0 ? `${formatearResultadoClinico(String(sensibilidad * factor), configLab.separador_decimal)} ${unidad}` : "Dilución inválida";
+        detalle = `Reactivo ${textoDilucion || "(dilución pendiente)"}`;
+      }
+    }
+    const auditoria = tipo === "FR"
+      ? `; lote ${nuevo.lote || "—"}; vence ${nuevo.vencimiento || "—"}; controles + ${nuevo.controlPositivo || "Conforme"}, − ${nuevo.controlNegativo || "Conforme"}`
+      : "";
+    const codigo = tipo === "ASTO" ? "ASTO_DILUCION" : "FR_DILUCION";
+    manejarCambioCampo(codigo, `${detalle}: ${resultado}; sensibilidad ${sensibilidad} ${unidad}${auditoria}`);
+    handleGuardarRangoOverride(codigo, "", "", `Referencia: < ${sensibilidad} ${unidad}`);
   };
 
   // Renderizar insignia de bandera (UX_GUIDE.md §4: ▲ Alto, ▼ Bajo, Normal, Sin confirmar)
@@ -1009,6 +1147,7 @@ export const CapturaResultadosPage: React.FC = () => {
 
   // Renderizar fila doble de diferencial (% editable y mm3 calculado)
   const renderizarFilaDiferencial = (pctParam: ParametroCaptura, absParam?: ParametroCaptura) => {
+    const nombreDiferencial = pctParam.codigo === "CAYADOS_PCT" ? etiquetaCayados : pctParam.nombre;
     const valorPctActual = valoresForm[pctParam.codigo] !== undefined
       ? valoresForm[pctParam.codigo]
       : pctParam.valor || "";
@@ -1019,7 +1158,9 @@ export const CapturaResultadosPage: React.FC = () => {
     return (
       <tr key={pctParam.codigo}>
         <td>
-          <span style={{ fontWeight: 600 }}>{pctParam.nombre}</span>
+          {pctParam.codigo === "CAYADOS_PCT" && !esAdmin ? (
+            <input aria-label="Nombre del diferencial" className="lis-captura-input" maxLength={80} value={etiquetaCayados} onChange={(e) => manejarCambioEtiquetaCayados(e.target.value)} style={{ width: 104, fontWeight: 600 }} />
+          ) : <span style={{ fontWeight: 600 }}>{nombreDiferencial}</span>}
           {pctParam.obligatorio && <span style={{ color: "var(--error)", marginLeft: "2px" }}>*</span>}
         </td>
         <td>
@@ -1035,7 +1176,7 @@ export const CapturaResultadosPage: React.FC = () => {
               onFocus={(e) => e.target.select()}
               disabled={esAdmin}
               placeholder="0"
-              title={`${pctParam.nombre} (%)`}
+              title={`${nombreDiferencial} (%)`}
             />
             <span style={{ fontSize: "11px", color: "var(--text-muted)", width: "12px" }}>%</span>
             <span
@@ -1232,7 +1373,34 @@ export const CapturaResultadosPage: React.FC = () => {
                 <strong>Resultado actual:</strong> {valorActual || (pcrReactividad === "Negativo" ? "Negativo" : "—")}
               </div>
             </div>
-          ) : param.tipo_campo === "SELECCION" ? (
+          ) : param.codigo === "ASTO_DILUCION" || param.codigo === "FR_DILUCION" ? (() => {
+            const tipo = param.codigo === "ASTO_DILUCION" ? "ASTO" : "FR";
+            const estado = titulaciones[tipo];
+            const actualizar = (cambios: Partial<EstadoTitulacion>) => actualizarTitulacion(tipo, cambios);
+            return (
+              <div className="lis-titulacion-control">
+                <div className="lis-titulacion-fields">
+                  <select className="lis-captura-input" value={estado.reactividad} onChange={(e) => actualizar({ reactividad: e.target.value, dilucion: e.target.value === "Reactivo" ? estado.dilucion : "" })} disabled={esAdmin} aria-label={`${tipo} resultado directo`}>
+                    <option>No reactivo</option><option>Reactivo</option>
+                  </select>
+                  <span className="lis-titulacion-sensitivity">Sensibilidad: {tipo === "ASTO" ? "200" : "8"} UI/mL</span>
+                  {estado.reactividad === "Reactivo" && <>
+                    <select className="lis-captura-input" value={estado.dilucion} onChange={(e) => actualizar({ dilucion: e.target.value })} disabled={esAdmin} aria-label={`${tipo} dilución`}>
+                      <option value="">Sin dilución</option><option value="1/2">1/2</option><option value="1/4">1/4</option><option value="1/8">1/8</option><option value="1/16">1/16</option><option value="1/32">1/32</option><option value="1/64">1/64</option><option value="OTRA">Otra</option>
+                    </select>
+                    {estado.dilucion === "OTRA" && <input className="lis-captura-input" value={estado.otra} onChange={(e) => actualizar({ otra: e.target.value })} placeholder="1/128" disabled={esAdmin} aria-label={`${tipo} otra dilución`} />}
+                  </>}
+                </div>
+                {tipo === "FR" && <div className="lis-titulacion-fields">
+                  <input className="lis-captura-input" value={estado.lote || ""} onChange={(e) => actualizar({ lote: e.target.value })} placeholder="Lote" disabled={esAdmin} aria-label="Lote FR" />
+                  <input className="lis-captura-input" type="date" value={estado.vencimiento || ""} onChange={(e) => actualizar({ vencimiento: e.target.value })} disabled={esAdmin} aria-label="Vencimiento FR" />
+                  <label>Control + <select className="lis-captura-input" value={estado.controlPositivo || "Conforme"} onChange={(e) => actualizar({ controlPositivo: e.target.value })} disabled={esAdmin}><option>Conforme</option><option>No conforme</option></select></label>
+                  <label>Control − <select className="lis-captura-input" value={estado.controlNegativo || "Conforme"} onChange={(e) => actualizar({ controlNegativo: e.target.value })} disabled={esAdmin}><option>Conforme</option><option>No conforme</option></select></label>
+                </div>}
+                <div className="lis-titulacion-result">{valorActual || (tipo === "ASTO" ? "< 200 UI/mL" : "< 8 UI/mL")}</div>
+              </div>
+            );
+          })() : param.tipo_campo === "SELECCION" ? (
             <select
               id={`input-${param.codigo}`}
               className="lis-captura-input"
@@ -1295,7 +1463,9 @@ export const CapturaResultadosPage: React.FC = () => {
             />
           )}
         </td>
-        <td style={{ fontSize: "12px", color: "var(--text-muted)" }}>{param.unidad || "—"}</td>
+        <td style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+          {["FR_DILUCION", "ASTO_DILUCION"].includes(param.codigo) ? "" : (param.unidad || "—")}
+        </td>
         <td style={{ fontSize: "11.5px", color: "var(--text-muted)" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
             <span>
@@ -1350,9 +1520,17 @@ export const CapturaResultadosPage: React.FC = () => {
     );
   };
 
+  const calcularSumaDiferencial = () => ["SEGMENTADOS_PCT", "LINFOCITOS_PCT", "EOSINOFILOS_PCT", "MONOCITOS_PCT", "CAYADOS_PCT"]
+    .reduce((total, codigo) => {
+      const raw = valoresForm[codigo] ?? "";
+      const value = Number(raw.replace(/\./g, "").replace(",", "."));
+      return total + (raw.trim() && Number.isFinite(value) ? value : 0);
+    }, 0);
+
   // Renderizar sección analítica
   const renderizarSeccion = (sec: SeccionCaptura) => {
     const esDiferencial = sec.grupo === "DIFERENCIAL";
+    const sumaDiferencial = esDiferencial ? calcularSumaDiferencial() : 0;
 
     return (
       <div key={sec.grupo || "general"} style={{ marginBottom: "6px" }}>
@@ -1399,6 +1577,12 @@ export const CapturaResultadosPage: React.FC = () => {
             })}
           </tbody>
         </table>
+        {esDiferencial && (
+          <div className={`lis-diferencial-suma ${sumaDiferencial >= 98 && sumaDiferencial <= 100 ? "is-valid" : "is-warning"}`} aria-live="polite">
+            <strong>Suma del diferencial: {sumaDiferencial.toLocaleString("es-BO", { maximumFractionDigits: 2 })} %</strong>
+            <span>{sumaDiferencial >= 98 && sumaDiferencial <= 100 ? "Dentro del intervalo esperado (98–100 %)" : "Revise el diferencial; el valor esperado es 98–100 %"}</span>
+          </div>
+        )}
       </div>
     );
   };
@@ -1945,449 +2129,48 @@ export const CapturaResultadosPage: React.FC = () => {
                     Vista previa de impresión
                   </span>
                 </div>
-                <button
-                  type="button"
-                  className="lis-btn lis-btn-secondary lis-btn-sm"
-                  onClick={() => setVistaPreviaFullscreen(true)}
-                  title="Abrir vista previa a pantalla completa en simulador de lector PDF"
-                  style={{ display: "flex", alignItems: "center", gap: "4px", fontWeight: 600 }}
-                >
-                  <span>⛶</span> Pantalla completa
-                </button>
+                <div className="lis-pdf-preview-actions">
+                  <button type="button" className="lis-btn lis-btn-outline lis-btn-sm" onClick={() => void actualizarVistaPreviaPdf()} disabled={cargandoPdf || esAdmin}>
+                    {cargandoPdf ? "Actualizando…" : "Actualizar PDF"}
+                  </button>
+                  {urlPdf && <a className="lis-btn lis-btn-secondary lis-btn-sm" href={urlPdf} download={`orden-${ordenId}-preliminar.pdf`}>Descargar</a>}
+                  <button type="button" className="lis-btn lis-btn-secondary lis-btn-sm" onClick={() => setVistaPreviaFullscreen(true)} disabled={!urlPdf} title="Abrir PDF paginado a pantalla completa">
+                    Pantalla completa
+                  </button>
+                </div>
               </div>
 
-              {/* Hoja de informe tamaño Carta con dimensiones proporcionales */}
-              <div className="lis-hoja-carta">
-                {/* Membrete del laboratorio */}
-                <div className="lis-preview-lab-header">
-                  <h2 className="lis-preview-lab-title">{configLab.nombre_laboratorio}</h2>
-                  <div className="lis-preview-lab-sub">Informe de Análisis Clínicos · Formato Carta</div>
-                </div>
-
-                {/* Bloque del paciente */}
-                <div className="lis-preview-patient-grid">
-                  <div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Paciente:</span>
-                    <strong>{nombrePaciente}</strong>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>C.I.:</span>
-                    <strong>{ciPaciente}</strong>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Edad / Sexo:</span>
-                    <strong>
-                      {edadStr} · {orden.paciente?.sexo === "M" ? "Masculino" : "Femenino"}
-                    </strong>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Inicio de orden:</span>
-                    <span>{horaInicioStr}</span>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Médico solicitante:</span>
-                    <span>{ordenDetalle?.medico_solicitante || "No especificado"}</span>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Bioquímico responsable:</span>
-                    <strong>
-                      {ordenDetalle?.autor
-                        ? `${ordenDetalle.autor.nombres} ${ordenDetalle.autor.apellido_paterno}`
-                        : (usuario ? `${usuario.nombres} ${usuario.apellido_paterno}` : "Bioquímico registrado")}
-                    </strong>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Pieza:</span>
-                    <span>{ordenDetalle?.pieza || "No asignada"}</span>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Fecha de solicitud:</span>
-                    <span>{ordenDetalle?.fecha_solicitud || horaInicioStr}</span>
-                  </div>
-                </div>
-
-                {/* Tablas por estudio con fuente limpia */}
-                {estudiosAsignados.map((estudio) => (
-                  <div
-                    key={estudio.codigo}
-                    style={{
-                      border: "1px solid var(--border-light)",
-                      borderRadius: "var(--radius)",
-                      padding: "8px",
-                      marginBottom: "10px",
-                    }}
-                  >
-                    <h4
-                      style={{
-                        margin: "0 0 6px 0",
-                        fontSize: "13.5px",
-                        fontWeight: 700,
-                        color: "var(--primary-hover)",
-                        borderBottom: "1px solid var(--border-light)",
-                        paddingBottom: "4px",
-                      }}
-                    >
-                      {estudio.nombre}
-                    </h4>
-                    <table className="lis-preview-study-table">
-                      <thead>
-                        <tr>
-                          <th style={{ width: "32%" }}>Parámetro</th>
-                          <th style={{ width: "24%", textAlign: "right" }}>Resultado</th>
-                          <th style={{ width: "14%" }}>Unidad</th>
-                          <th style={{ width: "18%" }}>Valores de referencia</th>
-                          <th style={{ width: "12%" }}>Bandera</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {estudio.secciones.flatMap((sec) =>
-                          sec.parametros.map((p) => {
-                            let valorTexto = "—";
-                            if (p.es_calculado) {
-                              if (p.calculable && p.valor !== null) {
-                                valorTexto = formatearValorVisual(p.valor);
-                              } else {
-                                valorTexto = `No calculable — ${p.motivo_no_calculable || "Faltan entradas"}`;
-                              }
-                            } else {
-                              const valAct = valoresForm[p.codigo] !== undefined ? valoresForm[p.codigo] : p.valor;
-                              if (valAct !== null && valAct !== undefined && valAct !== "") {
-                                valorTexto = formatearValorVisual(valAct);
-                              }
-                            }
-
-                            const vrefTexto = p.codigo === "PCR_DILUCION"
-                              ? (p.referencia?.texto || (pcrReactivo === "TECO" ? "< 0.8 mg/dL" : "< 6 mg/L"))
-                              : (p.referencia?.texto || "—");
-
-                            return (
-                              <tr key={p.codigo}>
-                                <td>
-                                  <span style={{ fontWeight: 600 }}>{p.nombre}</span>
-                                </td>
-                                <td style={{ textAlign: "right", fontWeight: 700 }}>
-                                  {valorTexto}
-                                </td>
-                                <td style={{ color: "var(--text-muted)" }}>{p.unidad || "—"}</td>
-                                <td style={{ color: "var(--text-muted)", fontSize: "12.5px" }}>
-                                  {vrefTexto}
-                                </td>
-                                <td>{renderizarBanderaBadge(p.bandera, p.es_defecto && !p.confirmado)}</td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
-
-                    {(observacionesEstudios[estudio.codigo] || estudio.observaciones) && (
-                      <div
-                        style={{
-                          marginTop: "6px",
-                          fontSize: "12px",
-                          color: "var(--text-muted)",
-                          fontStyle: "italic",
-                        }}
-                      >
-                        <strong>Nota del estudio:</strong>{" "}
-                        {observacionesEstudios[estudio.codigo] || estudio.observaciones}
-                      </div>
-                    )}
-                  </div>
-                ))}
-
-                {/* Observaciones generales en la vista previa */}
-                {observacionesOrden && (
-                  <div
-                    style={{
-                      marginTop: "12px",
-                      padding: "8px 12px",
-                      backgroundColor: "#f8fafc",
-                      border: "1px dashed var(--border-color)",
-                      borderRadius: "var(--radius)",
-                    }}
-                  >
-                    <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--text-main)" }}>
-                      Observaciones Generales:
-                    </div>
-                    <div style={{ fontSize: "12px", color: "var(--text-main)", whiteSpace: "pre-wrap", marginTop: "2px" }}>
-                      {observacionesOrden}
-                    </div>
-                  </div>
-                )}
-
-                <div
-                  style={{
-                    textAlign: "center",
-                    marginTop: "16px",
-                    borderTop: "1px solid var(--border-light)",
-                    paddingTop: "6px",
-                  }}
-                >
-                  <span style={{ fontSize: "11.5px", color: "var(--text-muted)", fontStyle: "italic" }}>
-                    Hoja 1 de 1 · Tamaño Carta (21,6 × 27,9 cm) · {configLab.nombre_laboratorio}
-                  </span>
-                </div>
+              <div className="lis-pdf-preview-frame" aria-live="polite">
+                {cargandoPdf && <div className="lis-pdf-preview-state">Generando el documento paginado…</div>}
+                {errorPdf && <div className="lis-alert lis-alert-error">{errorPdf}</div>}
+                {!urlPdf && !cargandoPdf && !errorPdf && <div className="lis-pdf-preview-state">La vista previa aparecerá aquí.</div>}
+                {urlPdf && <iframe ref={framePdfRef} title="Vista previa PDF no aprobada" src={`${urlPdf}#toolbar=1&navpanes=1&view=FitH`} />}
+              </div>
               </div>
             </div>
           </div>
-        </div>
       </form>
 
-      {/* Visor PDF de Pantalla Completa con fondo negro, zoom interactivo y márgenes laterales protegidos */}
       {vistaPreviaFullscreen && (
-        <div className="lis-pdf-simulator-overlay">
-          {/* Barra de herramientas superior estilo lector PDF */}
+        <div className="lis-pdf-simulator-overlay" role="dialog" aria-modal="true" aria-label="Vista previa del PDF preliminar">
           <div className="lis-pdf-toolbar">
-            <div className="lis-pdf-toolbar-left">
-              <span className="lis-pdf-toolbar-title">
-                Vista Previa Carta (21,6 × 27,9 cm) — Orden #{ordenDetalle?.numero_orden_paciente || ordenId}
-              </span>
-            </div>
-
+            <div className="lis-pdf-toolbar-left"><span className="lis-pdf-toolbar-title">Documento preliminar · Orden #{ordenDetalle?.numero_orden_paciente || ordenId}</span></div>
             <div className="lis-pdf-toolbar-center">
-              <button
-                type="button"
-                className="lis-pdf-tool-btn"
-                onClick={() => setZoomPdf((prev) => Math.max(0.4, Number((prev - 0.1).toFixed(2))))}
-                title="Reducir zoom (-)"
-              >
-                −
-              </button>
+              <button type="button" className="lis-pdf-tool-btn" onClick={() => setZoomPdf((prev) => Math.max(.5, Number((prev - .1).toFixed(2))))} aria-label="Reducir zoom">−</button>
               <span className="lis-pdf-zoom-text">{Math.round(zoomPdf * 100)}%</span>
-              <button
-                type="button"
-                className="lis-pdf-tool-btn"
-                onClick={() => setZoomPdf((prev) => Math.min(2.0, Number((prev + 0.1).toFixed(2))))}
-                title="Aumentar zoom (+)"
-              >
-                +
-              </button>
-              <button
-                type="button"
-                className="lis-pdf-tool-btn"
-                onClick={() => setZoomPdf(1.0)}
-                title="Zoom 100%"
-              >
-                100%
-              </button>
-              <button
-                type="button"
-                className="lis-pdf-tool-btn"
-                onClick={() => {
-                  const w = window.innerWidth;
-                  const escala = Math.min(1.3, Math.max(0.5, (w - 80) / 840));
-                  setZoomPdf(Number(escala.toFixed(2)));
-                }}
-                title="Ajustar al ancho de la pantalla"
-              >
-                Ajustar ancho
-              </button>
+              <button type="button" className="lis-pdf-tool-btn" onClick={() => setZoomPdf((prev) => Math.min(1.5, Number((prev + .1).toFixed(2))))} aria-label="Aumentar zoom">+</button>
+              <button type="button" className="lis-pdf-tool-btn" onClick={() => setZoomPdf(1)} title="Ajustar al ancho del visor">Ajustar ancho</button>
             </div>
-
             <div className="lis-pdf-toolbar-right">
-              <button
-                type="button"
-                className="lis-pdf-tool-btn lis-pdf-print-btn"
-                onClick={() => window.print()}
-                title="Imprimir documento en tamaño Carta"
-              >
-                🖨️ Imprimir
-              </button>
-              <button
-                type="button"
-                className="lis-pdf-tool-btn lis-pdf-close-btn"
-                onClick={() => setVistaPreviaFullscreen(false)}
-                title="Cerrar vista de pantalla completa (Esc)"
-              >
-                ✕ Salir (Esc)
-              </button>
+              <button type="button" className="lis-pdf-tool-btn" onClick={() => framePdfRef.current?.contentWindow?.print()} disabled={!urlPdf}>Imprimir</button>
+              {urlPdf && <a className="lis-pdf-tool-btn" href={urlPdf} download={`orden-${ordenId}-preliminar.pdf`}>Descargar PDF</a>}
+              <button type="button" className="lis-pdf-tool-btn lis-pdf-close-btn" onClick={() => setVistaPreviaFullscreen(false)}>Cerrar (Esc)</button>
             </div>
           </div>
-
-          {/* Área de desplazamiento vertical suave con hojas centradas */}
           <div className="lis-pdf-scroll-area">
-            <div
-              className="lis-pdf-document-wrapper"
-              style={{
-                transform: `scale(${zoomPdf})`,
-                transformOrigin: "top center",
-                transition: "transform 0.15s ease-out",
-              }}
-            >
-              <div className="lis-hoja-carta is-pdf-mode">
-                {/* Membrete del laboratorio */}
-                <div className="lis-preview-lab-header">
-                  <h2 className="lis-preview-lab-title">{configLab.nombre_laboratorio}</h2>
-                  <div className="lis-preview-lab-sub">Informe de Análisis Clínicos · Formato Carta Oficial</div>
-                </div>
-
-                {/* Bloque del paciente */}
-                <div className="lis-preview-patient-grid">
-                  <div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Paciente:</span>
-                    <strong>{nombrePaciente}</strong>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>C.I.:</span>
-                    <strong>{ciPaciente}</strong>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Edad / Sexo:</span>
-                    <strong>
-                      {edadStr} · {orden.paciente?.sexo === "M" ? "Masculino" : "Femenino"}
-                    </strong>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Inicio de orden:</span>
-                    <span>{horaInicioStr}</span>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Médico solicitante:</span>
-                    <span>{ordenDetalle?.medico_solicitante || "No especificado"}</span>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Bioquímico responsable:</span>
-                    <strong>
-                      {ordenDetalle?.autor
-                        ? `${ordenDetalle.autor.nombres} ${ordenDetalle.autor.apellido_paterno}`
-                        : (usuario ? `${usuario.nombres} ${usuario.apellido_paterno}` : "Bioquímico registrado")}
-                    </strong>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Pieza:</span>
-                    <span>{ordenDetalle?.pieza || "No asignada"}</span>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Fecha de solicitud:</span>
-                    <span>{ordenDetalle?.fecha_solicitud || horaInicioStr}</span>
-                  </div>
-                </div>
-
-                {/* Tablas por estudio con márgenes amplios */}
-                {estudiosAsignados.map((estudio) => (
-                  <div
-                    key={estudio.codigo}
-                    style={{
-                      border: "1px solid var(--border-light)",
-                      borderRadius: "var(--radius)",
-                      padding: "10px",
-                      marginBottom: "12px",
-                    }}
-                  >
-                    <h4
-                      style={{
-                        margin: "0 0 6px 0",
-                        fontSize: "14px",
-                        fontWeight: 700,
-                        color: "var(--primary-hover)",
-                        borderBottom: "1px solid var(--border-light)",
-                        paddingBottom: "4px",
-                      }}
-                    >
-                      {estudio.nombre}
-                    </h4>
-                    <table className="lis-preview-study-table">
-                      <thead>
-                        <tr>
-                          <th style={{ width: "32%" }}>Parámetro</th>
-                          <th style={{ width: "24%", textAlign: "right" }}>Resultado</th>
-                          <th style={{ width: "14%" }}>Unidad</th>
-                          <th style={{ width: "18%" }}>Valores de referencia</th>
-                          <th style={{ width: "12%" }}>Bandera</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {estudio.secciones.flatMap((sec) =>
-                          sec.parametros.map((p) => {
-                            let valorTexto = "—";
-                            if (p.es_calculado) {
-                              if (p.calculable && p.valor !== null) {
-                                valorTexto = formatearValorVisual(p.valor);
-                              } else {
-                                valorTexto = `No calculable — ${p.motivo_no_calculable || "Faltan entradas"}`;
-                              }
-                            } else {
-                              const valAct = valoresForm[p.codigo] !== undefined ? valoresForm[p.codigo] : p.valor;
-                              if (valAct !== null && valAct !== undefined && valAct !== "") {
-                                valorTexto = formatearValorVisual(valAct);
-                              }
-                            }
-
-                            const vrefTexto = p.codigo === "PCR_DILUCION"
-                              ? (p.referencia?.texto || (pcrReactivo === "TECO" ? "< 0.8 mg/dL" : "< 6 mg/L"))
-                              : (p.referencia?.texto || "—");
-
-                            return (
-                              <tr key={p.codigo}>
-                                <td>
-                                  <span style={{ fontWeight: 600 }}>{p.nombre}</span>
-                                </td>
-                                <td style={{ textAlign: "right", fontWeight: 700 }}>
-                                  {valorTexto}
-                                </td>
-                                <td style={{ color: "var(--text-muted)" }}>{p.unidad || "—"}</td>
-                                <td style={{ color: "var(--text-muted)", fontSize: "13px" }}>
-                                  {vrefTexto}
-                                </td>
-                                <td>{renderizarBanderaBadge(p.bandera, p.es_defecto && !p.confirmado)}</td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
-
-                    {(observacionesEstudios[estudio.codigo] || estudio.observaciones) && (
-                      <div
-                        style={{
-                          marginTop: "6px",
-                          fontSize: "12px",
-                          color: "var(--text-muted)",
-                          fontStyle: "italic",
-                        }}
-                      >
-                        <strong>Nota del estudio:</strong>{" "}
-                        {observacionesEstudios[estudio.codigo] || estudio.observaciones}
-                      </div>
-                    )}
-                  </div>
-                ))}
-
-                {/* Observaciones generales en el documento */}
-                {observacionesOrden && (
-                  <div
-                    style={{
-                      marginTop: "12px",
-                      padding: "8px 12px",
-                      backgroundColor: "#f8fafc",
-                      border: "1px dashed var(--border-color)",
-                      borderRadius: "var(--radius)",
-                    }}
-                  >
-                    <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--text-main)" }}>
-                      Observaciones Generales:
-                    </div>
-                    <div style={{ fontSize: "12.5px", color: "var(--text-main)", whiteSpace: "pre-wrap", marginTop: "2px" }}>
-                      {observacionesOrden}
-                    </div>
-                  </div>
-                )}
-
-                <div
-                  style={{
-                    textAlign: "center",
-                    marginTop: "20px",
-                    borderTop: "1px solid var(--border-light)",
-                    paddingTop: "8px",
-                  }}
-                >
-                  <span style={{ fontSize: "11.5px", color: "var(--text-muted)", fontStyle: "italic" }}>
-                    Hoja 1 de 1 · Formato Carta (21,6 × 27,9 cm) · {configLab.nombre_laboratorio}
-                  </span>
-                </div>
-              </div>
-            </div>
+            {cargandoPdf && <div className="lis-pdf-preview-state">Generando el documento paginado…</div>}
+            {errorPdf && <div className="lis-alert lis-alert-error">{errorPdf}</div>}
+            {urlPdf && <iframe ref={framePdfRef} className="lis-pdf-fullscreen-frame" title="PDF preliminar multipágina" src={`${urlPdf}#toolbar=1&navpanes=1&view=FitH`} style={{ transform: `scale(${zoomPdf})`, transformOrigin: "top center" }} />}
           </div>
         </div>
       )}

@@ -128,6 +128,11 @@ export async function getInforme(folio: string, version?: number): Promise<Infor
   return apiClient<InformeDetalle>(`/api/informes/${folio}${query}`, { method: 'GET' });
 }
 
+export async function descargarPdfInforme(folio: string, version?: number): Promise<Blob> {
+  const query = version ? `?version=${version}` : "";
+  return apiClient<Blob>(`/api/informes/${encodeURIComponent(folio)}/pdf${query}`, { method: "GET", responseType: "blob" });
+}
+
 export async function getHistorialInforme(folio: string): Promise<InformeEvento[]> {
   return apiClient<InformeEvento[]>(`/api/informes/${folio}/historial`, { method: 'GET' });
 }

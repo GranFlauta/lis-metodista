@@ -54,10 +54,11 @@ export function setOnMustChangePassword(callback: () => void): void {
 
 interface RequestOptions extends RequestInit {
   retryOnSessionExpired?: boolean;
+  responseType?: "json" | "blob";
 }
 
 export async function apiClient<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-  const { retryOnSessionExpired = true, ...fetchOptions } = options;
+  const { retryOnSessionExpired = true, responseType = "json", ...fetchOptions } = options;
 
   const headers = new Headers(fetchOptions.headers || {});
 
@@ -158,5 +159,5 @@ export async function apiClient<T>(endpoint: string, options: RequestOptions = {
     throw new ApiError(response.status, errorData.codigo, errorData.mensaje, errorData);
   }
 
-  return response.json() as Promise<T>;
+  return (responseType === "blob" ? response.blob() : response.json()) as Promise<T>;
 }

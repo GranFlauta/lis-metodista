@@ -2317,6 +2317,27 @@ a:focus-visible {
     display: none !important;
   }
 
+  .lis-captura-page > * { display: none !important; }
+  .lis-captura-page > form { display: none !important; }
+  .lis-captura-page > .lis-pdf-simulator-overlay { display: block !important; }
+  .lis-captura-page .lis-pdf-simulator-overlay {
+    display: block !important;
+    position: static !important;
+    inset: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    padding: 0 !important;
+  }
+  .lis-pdf-toolbar { display: none !important; }
+  .lis-pdf-scroll-area,
+  .lis-pdf-document-wrapper { display: block !important; overflow: visible !important; height: auto !important; max-height: none !important; transform: none !important; }
+  .lis-pdf-document-wrapper { width: auto !important; margin: 0 !important; }
+  .lis-hoja-carta.is-pdf-mode { width: auto !important; min-height: 0 !important; height: auto !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; }
+  .lis-preview-study-block { break-inside: avoid; page-break-inside: avoid; }
+  .lis-hoja-carta.is-pdf-mode table { width: 100%; }
+  .lis-hoja-carta.is-pdf-mode tr { break-inside: avoid; page-break-inside: avoid; }
+  .lis-hoja-carta.is-pdf-mode > div:last-child { display: none !important; }
+
   .lis-app-container,
   .lis-page-container,
   .lis-informe-view {
@@ -2354,6 +2375,195 @@ a:focus-visible {
     display: table-footer-group;
   }
 }
+
+.lis-diferencial-suma {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  font-size: 12px;
+  margin-top: 4px;
+}
+.lis-diferencial-suma.is-valid { background: #dcfce7; color: #166534; }
+.lis-diferencial-suma.is-warning { background: #fef3c7; color: #92400e; }
+.lis-preview-differential-values { display: inline-flex; justify-content: flex-end; gap: 12px; width: 100%; white-space: nowrap; }
+.lis-preview-study-table th,
+.lis-preview-study-table td { border-bottom: 1px solid #d8dee8; }
+.lis-preview-study-table tbody tr:nth-child(even) { background: #f8fafc; }
+.lis-quick-profile-editor { border-top: 1px solid var(--border-color); margin-top: 16px; padding-top: 12px; }
+.lis-quick-profile-editor h4 { margin: 0 0 8px; }
+.lis-quick-profile-list { margin-bottom: 10px; }
+.lis-quick-profile-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border-light); }
+.lis-quick-profile-row span { color: var(--text-muted); font-size: 12px; margin-left: auto; }
+.lis-quick-profile-editor > .lis-form-field { display: grid; gap: 4px; max-width: 420px; margin-bottom: 8px; }
+.lis-quick-profile-editor input:not([type="checkbox"]) { min-height: 32px; padding: 5px 8px; }
+.lis-quick-profile-studies { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; }
+.lis-quick-profile-study { padding: 5px 7px; border: 1px solid var(--border-light); border-radius: var(--radius); }
+.lis-quick-profile-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 5px 0 0 16px; gap: 3px; font-size: 12px; }
+.lis-quick-profile-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 10px; }
+.lis-titulacion-control { display: grid; gap: 5px; min-width: 270px; }
+.lis-titulacion-fields { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.lis-titulacion-fields .lis-captura-input { width: auto; min-width: 82px; }
+.lis-titulacion-fields label { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; }
+.lis-titulacion-sensitivity { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+.lis-titulacion-result { color: var(--text-main); font-size: 11.5px; overflow-wrap: anywhere; }
+
+/* Ajustes del tema oscuro: superficies interactivas legibles sin teñir los informes. */
+[data-theme="dark"] .lis-app-container {
+  color: #f1f5f9;
+  color-scheme: dark;
+}
+[data-theme="dark"] .lis-page-container,
+[data-theme="dark"] .lis-page-header,
+[data-theme="dark"] .lis-zone-card,
+[data-theme="dark"] .lis-table-card,
+[data-theme="dark"] .lis-cabecera-card,
+[data-theme="dark"] .lis-modal-card,
+[data-theme="dark"] .lis-filter-bar {
+  color: #f1f5f9;
+}
+[data-theme="dark"] .lis-text-muted,
+[data-theme="dark"] .lis-page-sub,
+[data-theme="dark"] .lis-page-header p {
+  color: #cbd5e1;
+}
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea,
+[data-theme="dark"] .lis-captura-input,
+[data-theme="dark"] .lis-select {
+  background-color: #1e293b;
+  border-color: #64748b;
+  color: #f8fafc;
+  caret-color: #fff;
+}
+[data-theme="dark"] select option {
+  background-color: #1e293b;
+  color: #f8fafc;
+}
+[data-theme="dark"] input::placeholder,
+[data-theme="dark"] textarea::placeholder {
+  color: #b6c2d0;
+  opacity: 1;
+}
+[data-theme="dark"] input:focus,
+[data-theme="dark"] select:focus,
+[data-theme="dark"] textarea:focus,
+[data-theme="dark"] .lis-captura-input:focus {
+  background-color: #26364a;
+  border-color: #93c5fd;
+  color: #fff;
+  box-shadow: 0 0 0 2px rgba(147, 197, 253, .24);
+}
+[data-theme="dark"] .lis-table th,
+[data-theme="dark"] table:not(.lis-preview-study-table):not(.lis-captura-tabla) th {
+  background: #263449;
+  color: #e2e8f0;
+}
+[data-theme="dark"] .lis-table td,
+[data-theme="dark"] table:not(.lis-preview-study-table):not(.lis-captura-tabla) td {
+  color: #f1f5f9;
+}
+[data-theme="dark"] .lis-table tbody tr:nth-child(even) {
+  background-color: #131e2b;
+}
+[data-theme="dark"] .lis-table tbody tr:hover,
+[data-theme="dark"] .lis-table tbody tr:hover td {
+  background-color: #26384d !important;
+  color: #fff !important;
+}
+[data-theme="dark"] .lis-sidebar-link:hover,
+[data-theme="dark"] .lis-sidebar-link.active,
+[data-theme="dark"] .lis-dropdown-item:hover {
+  background-color: #26384d;
+  color: #fff;
+}
+[data-theme="dark"] .lis-zone-card [style*="color: #0f172a"],
+[data-theme="dark"] .lis-zone-card [style*="color: #1e293b"],
+[data-theme="dark"] .lis-zone-card [style*="color: #334155"],
+[data-theme="dark"] .lis-zone-card [style*="color: #475569"],
+[data-theme="dark"] .lis-zone-card [style*="color: #64748b"],
+[data-theme="dark"] .lis-table-card [style*="color: #0f172a"],
+[data-theme="dark"] .lis-table-card [style*="color: #1e293b"],
+[data-theme="dark"] .lis-table-card [style*="color: #334155"],
+[data-theme="dark"] .lis-table-card [style*="color: #475569"],
+[data-theme="dark"] .lis-table-card [style*="color: #64748b"] {
+  color: #dbe4ef !important;
+}
+[data-theme="dark"] .lis-study-checkbox-card,
+[data-theme="dark"] .lis-nuevo-paciente-form,
+[data-theme="dark"] .lis-estudio-switch-item,
+[data-theme="dark"] .lis-perfil-btn,
+[data-theme="dark"] .lis-captura-tab.is-unassigned,
+[data-theme="dark"] .lis-captura-tab.is-assigned:not(.is-active),
+[data-theme="dark"] .lis-catalog-card,
+[data-theme="dark"] .lis-quick-profile-study {
+  background-color: #17212f;
+  border-color: #475569;
+  color: #e2e8f0;
+}
+[data-theme="dark"] .lis-study-checkbox-card.selected,
+[data-theme="dark"] .lis-estudio-switch-item.selected,
+[data-theme="dark"] .lis-captura-tab.is-unassigned.is-active {
+  background-color: #263b52;
+  border-color: #93c5fd;
+  color: #fff;
+}
+[data-theme="dark"] .lis-estudio-switch-item:hover,
+[data-theme="dark"] .lis-perfil-btn:hover,
+[data-theme="dark"] .lis-dropdown-item:hover,
+[data-theme="dark"] .lis-dropdown-item:focus,
+[data-theme="dark"] .lis-captura-tab.is-assigned:not(.is-active):hover,
+[data-theme="dark"] .lis-captura-tab.is-unassigned:hover {
+  background-color: #334155 !important;
+  color: #fff !important;
+  border-color: #94a3b8;
+}
+[data-theme="dark"] .lis-captura-tab.is-active,
+[data-theme="dark"] .lis-captura-tab.is-assigned.is-active {
+  background-color: #9f2630;
+  border-color: #fda4af;
+  color: #fff;
+}
+[data-theme="dark"] .lis-hoja-carta,
+[data-theme="dark"] .lis-hoja-carta.is-pdf-mode,
+[data-theme="dark"] .lis-informe-hoja {
+  background-color: #fff !important;
+  color: #0f172a !important;
+  color-scheme: light;
+}
+[data-theme="dark"] .lis-hoja-carta table th,
+[data-theme="dark"] .lis-informe-hoja table th {
+  background-color: #f1f5f9 !important;
+  color: #334155 !important;
+}
+[data-theme="dark"] .lis-hoja-carta table td,
+[data-theme="dark"] .lis-informe-hoja table td {
+  background-color: transparent;
+  color: #0f172a !important;
+}
+[data-theme="dark"] .lis-hoja-carta .lis-preview-study-table tbody tr:nth-child(even) {
+  background-color: #f8fafc;
+}
+[data-theme="dark"] .lis-hoja-carta .lis-preview-study-table tbody tr:hover td,
+[data-theme="dark"] .lis-informe-hoja .lis-table tbody tr:hover td {
+  background-color: inherit !important;
+  color: inherit !important;
+}
+.lis-pdf-preview-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.lis-pdf-preview-frame { position: relative; height: min(76vh, 900px); min-height: 560px; overflow: hidden; background: #374151; border-radius: 3px; }
+.lis-pdf-preview-frame iframe { width: 100%; height: 100%; border: 0; background: #fff; }
+.lis-pdf-preview-state { display: grid; place-items: center; min-height: 180px; width: 100%; padding: 24px; color: #e2e8f0; text-align: center; }
+.lis-pdf-fullscreen-frame { width: min(100%, 1050px); height: 100%; min-height: 85vh; border: 0; background: #fff; }
+.lis-pdf-scroll-area { align-items: flex-start; }
+.lis-official-pdf-panel { margin: 10px auto 18px; width: min(100%, 1100px); background: #e2e8f0; border: 1px solid #cbd5e1; padding: 10px; }
+.lis-official-pdf-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; color: #1e293b; }
+.lis-official-pdf-frame { display: block; width: 100%; height: min(80vh, 1100px); min-height: 650px; border: 0; background: #fff; }
+.lis-official-pdf-state { display: grid; min-height: 200px; place-items: center; color: #334155; }
+[data-theme="dark"] .lis-official-pdf-panel { background: #0b1220; border-color: #475569; }
+[data-theme="dark"] .lis-official-pdf-toolbar { color: #f1f5f9; }
 
 /* --- Cabecera fija y notificaciones fijas del estudio enfocado --- */
 .lis-captura-sticky-header-group {
@@ -2548,4 +2758,22 @@ a:focus-visible {
   flex-direction: column;
   gap: 24px;
 }
+
+.lis-diferencial-suma {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  font-size: 12px;
+  margin-top: 4px;
+}
+.lis-diferencial-suma.is-valid { background: #dcfce7; color: #166534; }
+.lis-diferencial-suma.is-warning { background: #fef3c7; color: #92400e; }
+.lis-preview-differential-values { display: inline-flex; justify-content: flex-end; gap: 12px; width: 100%; white-space: nowrap; }
+.lis-preview-differential-total { padding: 5px 7px; border-top: 1px solid #cbd5e1; text-align: right; font-size: 12px; }
+.lis-preview-study-table th,
+.lis-preview-study-table td { border-bottom: 1px solid #d8dee8; }
+.lis-preview-study-table tbody tr:nth-child(even) { background: #f8fafc; }
 

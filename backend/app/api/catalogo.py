@@ -8,13 +8,15 @@ Accesible a cualquier usuario autenticado (ADMIN o BIOQUIMICO).
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_auth
 from app.core.database import get_db
-from app.models.catalog import Estudio, EstudioVersion, Parametro, Perfil, PerfilEstudio
+from app.core.errors import NoEncontradoError, ValidacionError, ConflictoError
+from app.models.catalog import Estudio, EstudioVersion, Parametro, Perfil, PerfilEstudio, PerfilRapido
 from app.models.user import Usuario
-from app.schemas.catalogo import EstudioCatalogo, GrupoEstudio, ParametroResumen, PerfilCatalogo, PerfilEstudioItem
+from app.schemas.catalogo import EstudioCatalogo, GrupoEstudio, ParametroResumen, PerfilCatalogo, PerfilEstudioItem, PerfilRapidoRequest, PerfilRapidoResponse
 
 router = APIRouter(prefix="/api/catalogo", tags=["Catálogo"])
 
@@ -120,3 +122,84 @@ def listar_perfiles(
         )
 
     return resultado
+
+
+def _serializar_perfil_rapido(perfil: PerfilRapido) -> PerfilRapidoResponse:
+    return PerfilRapidoResponse(
+        id=perfil.id_perfil_rapido,
+        nombre=perfil.nombre,
+        estudios=[PerfilEstudioItem(**item) for item in perfil.estudios],
+    )
+
+
+def _validar_estudios_rapidos(db: Session, items: list[PerfilEstudioItem]) -> list[dict]:
+    if not items:
+        raise ValidacionError("Seleccione al menos un estudio para el perfil rápido.")
+    codigos = [item.codigo for item in items]
+    if len(codigos) != len(set(codigos)):
+        raise ValidacionError("El perfil rápido contiene estudios repetidos.")
+    resultado = []
+    for item in items:
+        estudio = db.query(Estudio).filter(Estudio.codigo == item.codigo, Estudio.activo == True).first()
+        if not estudio:
+            raise ValidacionError(f"El estudio '{item.codigo}' no está activo en el catálogo.")
+        grupos = item.grupos
+        if estudio.seleccion_parcial:
+            version = db.query(EstudioVersion).filter(EstudioVersion.id_estudio == estudio.id_estudio, EstudioVersion.activa == True).first()
+            existentes = {p.grupo for p in db.query(Parametro.grupo).filter(Parametro.id_estudio_version == version.id_estudio_version, Parametro.grupo.isnot(None)).distinct().all()} if version else set()
+            if not grupos or not set(grupos).issubset(existentes):
+                raise ValidacionError(f"Seleccione grupos válidos para '{estudio.nombre}'.")
+        else:
+            grupos = None
+        resultado.append({"codigo": item.codigo, "grupos": grupos})
+    return resultado
+
+
+@router.get("/perfiles-rapidos", response_model=list[PerfilRapidoResponse])
+def listar_perfiles_rapidos(db: Session = Depends(get_db), current_user: Usuario = Depends(require_auth)):
+    perfiles = db.query(PerfilRapido).filter(PerfilRapido.id_usuario == current_user.id_usuario).order_by(PerfilRapido.nombre).all()
+    return [_serializar_perfil_rapido(item) for item in perfiles]
+
+
+@router.post("/perfiles-rapidos", response_model=PerfilRapidoResponse, status_code=201)
+def crear_perfil_rapido(body: PerfilRapidoRequest, db: Session = Depends(get_db), current_user: Usuario = Depends(require_auth)):
+    nombre = body.nombre.strip()
+    if not nombre:
+        raise ValidacionError("El nombre del perfil rápido es obligatorio.")
+    perfil = PerfilRapido(id_usuario=current_user.id_usuario, nombre=nombre, estudios=_validar_estudios_rapidos(db, body.estudios))
+    db.add(perfil)
+    try:
+        db.commit()
+        db.refresh(perfil)
+    except IntegrityError:
+        db.rollback()
+        raise ConflictoError("Ya existe un perfil rápido con ese nombre.")
+    return _serializar_perfil_rapido(perfil)
+
+
+@router.put("/perfiles-rapidos/{perfil_id}", response_model=PerfilRapidoResponse)
+def actualizar_perfil_rapido(perfil_id: int, body: PerfilRapidoRequest, db: Session = Depends(get_db), current_user: Usuario = Depends(require_auth)):
+    perfil = db.query(PerfilRapido).filter(PerfilRapido.id_perfil_rapido == perfil_id, PerfilRapido.id_usuario == current_user.id_usuario).first()
+    if not perfil:
+        raise NoEncontradoError("El perfil rápido no existe.")
+    nombre = body.nombre.strip()
+    if not nombre:
+        raise ValidacionError("El nombre del perfil rápido es obligatorio.")
+    perfil.nombre = nombre
+    perfil.estudios = _validar_estudios_rapidos(db, body.estudios)
+    try:
+        db.commit()
+        db.refresh(perfil)
+    except IntegrityError:
+        db.rollback()
+        raise ConflictoError("Ya existe un perfil rápido con ese nombre.")
+    return _serializar_perfil_rapido(perfil)
+
+
+@router.delete("/perfiles-rapidos/{perfil_id}", status_code=204)
+def eliminar_perfil_rapido(perfil_id: int, db: Session = Depends(get_db), current_user: Usuario = Depends(require_auth)):
+    perfil = db.query(PerfilRapido).filter(PerfilRapido.id_perfil_rapido == perfil_id, PerfilRapido.id_usuario == current_user.id_usuario).first()
+    if not perfil:
+        raise NoEncontradoError("El perfil rápido no existe.")
+    db.delete(perfil)
+    db.commit()

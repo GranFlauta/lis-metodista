@@ -622,7 +622,11 @@ def evaluar_captura_orden(
 
             param_dict = {
                 "codigo": p.codigo,
-                "nombre": p.nombre,
+                "nombre": (
+                    oe.etiqueta_cayados if p.codigo == "CAYADOS_PCT" and oe.etiqueta_cayados
+                    else f"{oe.etiqueta_cayados} (abs.)" if p.codigo == "CAYADOS_ABS" and oe.etiqueta_cayados
+                    else p.nombre
+                ),
                 "tipo_campo": p.tipo_campo,
                 "unidad": p.unidad_medida,
                 "decimales": p.decimales,
@@ -652,6 +656,7 @@ def evaluar_captura_orden(
             "codigo": est.codigo,
             "nombre": est.nombre,
             "observaciones": oe.observaciones,
+            "etiqueta_cayados": oe.etiqueta_cayados,
             "grupos_seleccionados": grupos_sel,
             "secciones": secciones,
             "validaciones": validaciones_estudio,
@@ -687,6 +692,7 @@ def guardar_resultados_orden(
     rangos_override: dict[str, Any] | None = None,
     observaciones_estudios: dict[str, str | None] | None = None,
     observaciones_orden: str | None = None,
+    etiquetas_estudios: dict[str, str | None] | None = None,
 ) -> dict[str, Any]:
     """
     Persiste los cambios parciales en `resultados_borrador`, recalcula todos los CALCULADO
@@ -709,6 +715,17 @@ def guardar_resultados_orden(
             if oe.estudio.codigo in observaciones_estudios:
                 obs_val = observaciones_estudios[oe.estudio.codigo]
                 oe.observaciones = obs_val.strip() if obs_val and obs_val.strip() else None
+
+    if etiquetas_estudios is not None:
+        estudios_por_codigo = {oe.estudio.codigo: oe for oe in orden.estudios}
+        for codigo, valor in etiquetas_estudios.items():
+            oe = estudios_por_codigo.get(codigo)
+            if not oe or oe.estudio.codigo != "HEMOGRAMA":
+                raise ValidacionError(f"No se puede editar la etiqueta diferencial del estudio '{codigo}'.")
+            etiqueta = valor.strip() if valor else ""
+            if len(etiqueta) > 80:
+                raise ValidacionError("La etiqueta de cayados debe tener como máximo 80 caracteres.")
+            oe.etiqueta_cayados = etiqueta or None
 
     alcance_por_oe = obtener_parametros_alcance_orden(orden)
     # Mapear códigos a (OrdenEstudio, Parametro)

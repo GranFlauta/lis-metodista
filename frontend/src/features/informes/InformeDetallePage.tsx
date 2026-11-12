@@ -3,10 +3,11 @@
  * Presenta el documento oficial inmutable generado a partir del snapshot JSON con huella SHA-256.
  * Optimizado para impresión física (@media print) con diseño sobrio y profesional.
  */
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { getInforme, InformeDetalle } from "../../api/informes";
+import { descargarPdfInforme, getInforme, InformeDetalle } from "../../api/informes";
 import { formatearResultadoClinico } from "../../utils/formatoNumerico";
+import { formatoResultadoInmunoserologia } from "../../utils/formatoResultadoInmunoserologia";
 
 export const InformeDetallePage: React.FC = () => {
   const { folio } = useParams<{ folio: string }>();
@@ -14,6 +15,9 @@ export const InformeDetallePage: React.FC = () => {
   const [informe, setInforme] = useState<InformeDetalle | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [cargandoPdf, setCargandoPdf] = useState(false);
+  const pdfFrameRef = useRef<HTMLIFrameElement | null>(null);
 
   // Versión seleccionada (si hay múltiples)
   const [versionSeleccionada, setVersionSeleccionada] = useState<number | undefined>(undefined);
@@ -37,6 +41,30 @@ export const InformeDetallePage: React.FC = () => {
 
   useEffect(() => {
     cargarDatos(versionSeleccionada);
+  }, [folio, versionSeleccionada]);
+
+  useEffect(() => {
+    if (!folio) return;
+    let vigente = true;
+    let urlTemporal: string | null = null;
+    setPdfUrl(null);
+    setCargandoPdf(true);
+    descargarPdfInforme(folio, versionSeleccionada)
+      .then((blob) => {
+        if (!vigente) return;
+        urlTemporal = URL.createObjectURL(blob);
+        setPdfUrl(urlTemporal);
+      })
+      .catch(() => {
+        if (vigente) setPdfUrl(null);
+      })
+      .finally(() => {
+        if (vigente) setCargandoPdf(false);
+      });
+    return () => {
+      vigente = false;
+      if (urlTemporal) URL.revokeObjectURL(urlTemporal);
+    };
   }, [folio, versionSeleccionada]);
 
   if (cargando) {
@@ -72,7 +100,7 @@ export const InformeDetallePage: React.FC = () => {
   const estudios = snapshot.estudios || [];
 
   const handleImprimir = () => {
-    window.print();
+    pdfFrameRef.current?.contentWindow?.print();
   };
 
   const puedeImprimir = informe.estado === "VIGENTE";
@@ -164,8 +192,21 @@ export const InformeDetallePage: React.FC = () => {
         </div>
       </div>
 
+      {puedeImprimir && <section className="lis-official-pdf-panel lis-no-print" aria-label="Vista previa multipágina PDF">
+        <div className="lis-official-pdf-toolbar">
+          <strong>Vista previa del informe PDF</strong>
+          <div className="lis-pdf-preview-actions">
+            {pdfUrl && <a className="lis-btn lis-btn-secondary lis-btn-sm" href={pdfUrl} download={`informe-${informe.folio}-v${informe.numero_version}.pdf`}>Descargar PDF</a>}
+            <button type="button" className="lis-btn lis-btn-primary lis-btn-sm" disabled={!pdfUrl} onClick={handleImprimir}>Imprimir PDF</button>
+          </div>
+        </div>
+        {cargandoPdf && <div className="lis-official-pdf-state">Preparando el PDF paginado…</div>}
+        {!cargandoPdf && !pdfUrl && <div className="lis-alert lis-alert-error">No se pudo cargar el documento PDF. Vuelva a abrir el informe para reintentar.</div>}
+        {pdfUrl && <iframe ref={pdfFrameRef} className="lis-official-pdf-frame" title={`Informe oficial ${informe.folio}`} src={`${pdfUrl}#toolbar=1&navpanes=1&view=FitH`} />}
+      </section>}
+
       {/* Documento Clínico Formal (A4 / Carta Listo para Imprimir) */}
-      <div className="lis-informe-hoja">
+      <div className="lis-informe-hoja" style={{ display: puedeImprimir && pdfUrl ? "none" : undefined }}>
         {/* Cabecera Institucional Metodista */}
         <header className="lis-informe-header">
           <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
@@ -335,10 +376,12 @@ export const InformeDetallePage: React.FC = () => {
                               }}
                             >
                               {param.valor !== null && param.valor !== undefined
-                                ? formatearResultadoClinico(String(param.valor), ",")
+                                ? (param.codigo === "FR_DILUCION" || param.codigo === "ASTO_DILUCION"
+                                    ? formatoResultadoInmunoserologia(param.codigo, String(param.valor))
+                                    : formatearResultadoClinico(String(param.valor), ","))
                                 : "—"}
                             </td>
-                            <td style={{ color: "#64748b", padding: "4px 8px" }}>{param.unidad || "—"}</td>
+                            <td style={{ color: "#64748b", padding: "4px 8px" }}>{param.codigo === "FR_DILUCION" || param.codigo === "ASTO_DILUCION" ? "" : (param.unidad || "—")}</td>
                             <td style={{ color: "#475569", fontSize: "11px", padding: "4px 8px" }}>
                               {param.referencia?.texto || "—"}
                             </td>

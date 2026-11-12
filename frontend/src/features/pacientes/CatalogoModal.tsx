@@ -11,6 +11,11 @@ import {
   obtenerEstudiosCatalogoApi,
   obtenerPerfilesCatalogoApi,
   PerfilCatalogo,
+  PerfilRapido,
+  listarPerfilesRapidosApi,
+  crearPerfilRapidoApi,
+  actualizarPerfilRapidoApi,
+  eliminarPerfilRapidoApi,
 } from "../../api/catalogo";
 import { ApiError } from "../../api/client";
 
@@ -23,6 +28,10 @@ export const CatalogoModal: React.FC<CatalogoModalProps> = ({ abierto, onCerrar 
   const [pestana, setPestana] = useState<"estudios" | "perfiles">("estudios");
   const [estudios, setEstudios] = useState<EstudioCatalogo[]>([]);
   const [perfiles, setPerfiles] = useState<PerfilCatalogo[]>([]);
+  const [perfilesRapidos, setPerfilesRapidos] = useState<PerfilRapido[]>([]);
+  const [nombrePerfilRapido, setNombrePerfilRapido] = useState("");
+  const [estudiosPerfilRapido, setEstudiosPerfilRapido] = useState<Record<string, string[]>>({});
+  const [perfilRapidoEditando, setPerfilRapidoEditando] = useState<number | null>(null);
   const [cargando, setCargando] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,12 +42,14 @@ export const CatalogoModal: React.FC<CatalogoModalProps> = ({ abierto, onCerrar 
       setCargando(true);
       setError(null);
       try {
-        const [estData, perfData] = await Promise.all([
+        const [estData, perfData, rapidos] = await Promise.all([
           obtenerEstudiosCatalogoApi(),
           obtenerPerfilesCatalogoApi(),
+          listarPerfilesRapidosApi(),
         ]);
         setEstudios(estData);
         setPerfiles(perfData);
+        setPerfilesRapidos(rapidos);
       } catch (err: unknown) {
         if (err instanceof ApiError) {
           setError(err.message);
@@ -54,6 +65,29 @@ export const CatalogoModal: React.FC<CatalogoModalProps> = ({ abierto, onCerrar 
   }, [abierto]);
 
   if (!abierto) return null;
+
+  const cargarEditorPerfil = (perfil?: PerfilRapido) => {
+    setNombrePerfilRapido(perfil?.nombre || "");
+    setPerfilRapidoEditando(perfil?.id ?? null);
+    setEstudiosPerfilRapido(Object.fromEntries((perfil?.estudios || []).map((item) => [item.codigo, item.grupos || []])));
+  };
+
+  const guardarPerfilRapido = async () => {
+    const payload = {
+      nombre: nombrePerfilRapido,
+      estudios: Object.entries(estudiosPerfilRapido).map(([codigo, grupos]) => ({ codigo, grupos: grupos.length ? grupos : null })),
+    };
+    try {
+      const saved = perfilRapidoEditando
+        ? await actualizarPerfilRapidoApi(perfilRapidoEditando, payload)
+        : await crearPerfilRapidoApi(payload);
+      setPerfilesRapidos((prev) => perfilRapidoEditando ? prev.map((item) => item.id === saved.id ? saved : item) : [...prev, saved]);
+      cargarEditorPerfil();
+      setError(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo guardar el perfil rápido.");
+    }
+  };
 
   return (
     <div className="lis-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-catalogo-title">
@@ -135,6 +169,7 @@ export const CatalogoModal: React.FC<CatalogoModalProps> = ({ abierto, onCerrar 
           )}
 
           {!cargando && !error && pestana === "perfiles" && (
+            <div>
             <div className="lis-catalog-grid">
               {perfiles.map((perf) => (
                 <div key={perf.codigo} className="lis-catalog-card">
@@ -164,6 +199,44 @@ export const CatalogoModal: React.FC<CatalogoModalProps> = ({ abierto, onCerrar 
                   </div>
                 </div>
               ))}
+            </div>
+            <section className="lis-quick-profile-editor">
+              <h4>Perfiles rápidos personalizados</h4>
+              <div className="lis-quick-profile-list">
+                {perfilesRapidos.map((perfil) => <div key={perfil.id} className="lis-quick-profile-row">
+                  <strong>{perfil.nombre}</strong><span>{perfil.estudios.length} estudios</span>
+                  <button type="button" className="lis-btn lis-btn-text" onClick={() => cargarEditorPerfil(perfil)}>Editar</button>
+                  <button type="button" className="lis-btn lis-btn-text" onClick={async () => {
+                    if (!window.confirm(`¿Eliminar el perfil “${perfil.nombre}”?`)) return;
+                    try { await eliminarPerfilRapidoApi(perfil.id); setPerfilesRapidos((prev) => prev.filter((p) => p.id !== perfil.id)); }
+                    catch (err) { setError(err instanceof ApiError ? err.message : "No se pudo eliminar el perfil rápido."); }
+                  }}>Eliminar</button>
+                </div>)}
+              </div>
+              <label className="lis-form-field">Nombre del perfil
+                <input value={nombrePerfilRapido} maxLength={100} onChange={(e) => setNombrePerfilRapido(e.target.value)} />
+              </label>
+              <div className="lis-quick-profile-studies">
+                {estudios.map((estudio) => {
+                  const gruposActuales = estudiosPerfilRapido[estudio.codigo];
+                  return <div className="lis-quick-profile-study" key={estudio.codigo}>
+                    <label><input type="checkbox" checked={gruposActuales !== undefined} onChange={(e) => setEstudiosPerfilRapido((prev) => {
+                      const next = { ...prev };
+                      if (e.target.checked) next[estudio.codigo] = estudio.seleccion_parcial ? [] : [];
+                      else delete next[estudio.codigo];
+                      return next;
+                    })} /> {estudio.nombre}</label>
+                    {gruposActuales !== undefined && estudio.seleccion_parcial && <div className="lis-quick-profile-groups">
+                      {estudio.grupos?.map((grupo) => <label key={grupo.codigo}><input type="checkbox" checked={gruposActuales.includes(grupo.codigo)} onChange={(e) => setEstudiosPerfilRapido((prev) => ({ ...prev, [estudio.codigo]: e.target.checked ? [...(prev[estudio.codigo] || []), grupo.codigo] : (prev[estudio.codigo] || []).filter((item) => item !== grupo.codigo) }))} /> {grupo.codigo.replace(/_/g, " ")}</label>)}
+                    </div>}
+                  </div>;
+                })}
+              </div>
+              <div className="lis-quick-profile-actions">
+                <button type="button" className="lis-btn lis-btn-secondary" onClick={() => cargarEditorPerfil()}>Limpiar</button>
+                <button type="button" className="lis-btn lis-btn-primary" disabled={!nombrePerfilRapido.trim() || !Object.keys(estudiosPerfilRapido).length || Object.entries(estudiosPerfilRapido).some(([codigo, grupos]) => estudios.find((item) => item.codigo === codigo)?.seleccion_parcial && !grupos.length)} onClick={guardarPerfilRapido}>{perfilRapidoEditando ? "Guardar cambios" : "Crear perfil rápido"}</button>
+              </div>
+            </section>
             </div>
           )}
         </div>

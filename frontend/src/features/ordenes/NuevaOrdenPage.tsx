@@ -10,6 +10,8 @@ import {
   obtenerEstudiosCatalogoApi,
   obtenerPerfilesCatalogoApi,
   PerfilCatalogo,
+  PerfilRapido,
+  listarPerfilesRapidosApi,
 } from "../../api/catalogo";
 import {
   listarPacientesApi,
@@ -59,6 +61,7 @@ export const NuevaOrdenPage: React.FC = () => {
   // Catálogo clínico
   const [estudiosCatalogo, setEstudiosCatalogo] = useState<EstudioCatalogo[]>([]);
   const [perfilesCatalogo, setPerfilesCatalogo] = useState<PerfilCatalogo[]>([]);
+  const [perfilesRapidos, setPerfilesRapidos] = useState<PerfilRapido[]>([]);
   const [cargandoCatalogo, setCargandoCatalogo] = useState<boolean>(true);
 
   // Zona 1: Paciente
@@ -155,13 +158,15 @@ export const NuevaOrdenPage: React.FC = () => {
     async function cargarCat() {
       setCargandoCatalogo(true);
       try {
-        const [estData, perfData] = await Promise.all([
+        const [estData, perfData, quickProfiles] = await Promise.all([
           obtenerEstudiosCatalogoApi(),
           obtenerPerfilesCatalogoApi(),
+          listarPerfilesRapidosApi(),
         ]);
         if (montado) {
           setEstudiosCatalogo(estData);
           setPerfilesCatalogo(perfData);
+          setPerfilesRapidos(quickProfiles);
         }
       } catch {
         // Silencioso o manejo local
@@ -238,7 +243,10 @@ export const NuevaOrdenPage: React.FC = () => {
       return;
     }
     setPerfilActivo(codigoPerfil);
-    const perfil = perfilesCatalogo.find((p) => p.codigo === codigoPerfil);
+    const rapido = codigoPerfil.startsWith("RAPIDO-")
+      ? perfilesRapidos.find((p) => p.id === Number(codigoPerfil.slice(7)))
+      : undefined;
+    const perfil = rapido || perfilesCatalogo.find((p) => p.codigo === codigoPerfil);
     if (!perfil) return;
 
     const nuevosEstudios = new Set<string>();
@@ -254,7 +262,12 @@ export const NuevaOrdenPage: React.FC = () => {
     }
 
     setEstudiosSeleccionados(nuevosEstudios);
-    setGruposInmunosero(nuevosGrupos);
+    if (rapido) {
+      const grupoInmuno = rapido.estudios.find((item) => item.codigo === "INMUNOSEROLOGIA")?.grupos || [];
+      setGruposInmunosero(new Set(grupoInmuno));
+    } else {
+      setGruposInmunosero(nuevosGrupos);
+    }
   };
 
   // Toggle de estudio individual
@@ -374,7 +387,7 @@ export const NuevaOrdenPage: React.FC = () => {
     const payload: OrdenCreatePayload = {
       id_paciente: pacienteSeleccionado ? pacienteSeleccionado.id : null,
       paciente: pacPayload,
-      perfil: perfilActivo || null,
+      perfil: perfilActivo.startsWith("RAPIDO-") ? null : (perfilActivo || null),
       estudios: estudiosPayload,
       origen_solicitud: null,
       medico_solicitante: medicoSolicitante.trim() || null,
@@ -900,6 +913,17 @@ export const NuevaOrdenPage: React.FC = () => {
                   type="button"
                   onClick={() => handleSeleccionarPerfil(perf.codigo)}
                   className={`lis-perfil-btn ${perfilActivo === perf.codigo ? "active" : ""}`}
+                >
+                  {perf.nombre}
+                </button>
+              ))}
+              {perfilesRapidos.map((perf) => (
+                <button
+                  key={`RAPIDO-${perf.id}`}
+                  type="button"
+                  onClick={() => handleSeleccionarPerfil(`RAPIDO-${perf.id}`)}
+                  className={`lis-perfil-btn ${perfilActivo === `RAPIDO-${perf.id}` ? "active" : ""}`}
+                  title="Perfil rápido personalizado"
                 >
                   {perf.nombre}
                 </button>

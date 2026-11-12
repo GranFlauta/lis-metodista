@@ -14,13 +14,16 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Optional
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_auth
+from app.core.clock import ahora
 from app.core.database import get_db
+from app.core.errors import NoEncontradoError, ProhibidoError
 from app.models.report import Informe, InformeEvento
 from app.models.user import Usuario
+from app.reports.pdf import generar_informe_pdf
 from app.schemas.informe import (
     InformeDetalleResponse,
     InformeEventoResponse,
@@ -40,6 +43,64 @@ from app.services.informes_service import (
 )
 
 router = APIRouter(prefix="/api/informes", tags=["Informes"])
+
+
+@router.get("/{folio}/pdf", response_class=Response, summary="Descargar o abrir PDF oficial")
+def descargar_pdf_informe(
+    folio: str,
+    version: Optional[int] = Query(None, ge=1, le=3),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(require_auth),
+) -> Response:
+    """Entrega exclusivamente la versión vigente y registra cada emisión para impresión."""
+    if current_user.rol and current_user.rol.nombre == "VISITANTE":
+        raise ProhibidoError("El rol visitante no tiene permiso para descargar o imprimir informes.")
+    informe = obtener_informe_por_folio(db, folio, numero_version=version)
+    if informe.estado != "VIGENTE":
+        raise ProhibidoError("Solo se puede descargar o imprimir la versión vigente del informe.")
+    snapshot = informe.snapshot_json
+    paciente = snapshot.get("paciente") or {}
+    orden = snapshot.get("orden") or {}
+    firmante = snapshot.get("firmante") or {}
+    paciente_nombre = " ".join(filter(None, [paciente.get("nombres"), paciente.get("apellido_paterno"), paciente.get("apellido_materno")]))
+    edad = f"{paciente['edad_anios']} años" if paciente.get("edad_anios") is not None else (f"{paciente['edad_meses']} meses" if paciente.get("edad_meses") else "")
+    firmado_nombre = " ".join(filter(None, [firmante.get("nombres"), firmante.get("apellido_paterno"), firmante.get("apellido_materno")]))
+    documento = {
+        "aprobado": True,
+        "folio": informe.folio,
+        "numero_orden": orden.get("numero_orden_paciente"),
+        "numero_version": informe.numero_version,
+        "publicado_en": informe.publicado_en.isoformat(),
+        "snapshot_sha256": informe.snapshot_sha256,
+        "paciente": {
+            "nombre_completo": paciente_nombre,
+            "ci": paciente.get("ci"),
+            "sexo_texto": "Masculino" if paciente.get("sexo") == "M" else "Femenino" if paciente.get("sexo") == "F" else "—",
+            "edad": edad,
+        },
+        "orden": orden,
+        "firmante": {"nombre_completo": firmado_nombre, "matricula": firmante.get("matricula_profesional")},
+        "estudios": snapshot.get("estudios") or [],
+    }
+    pdf = generar_informe_pdf(documento)
+    db.add(InformeEvento(
+        folio=informe.folio,
+        numero_version=informe.numero_version,
+        id_usuario=current_user.id_usuario,
+        accion="IMPRESION",
+        detalle={"formato": "PDF"},
+        creado_en=ahora(),
+    ))
+    db.commit()
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="informe-{informe.folio}-v{informe.numero_version}.pdf"',
+            "Cache-Control": "private, no-store, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 def serializar_item_informe(inf: Informe) -> dict[str, Any]:
