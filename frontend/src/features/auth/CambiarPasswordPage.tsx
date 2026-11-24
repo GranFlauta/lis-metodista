@@ -8,6 +8,8 @@ import { useNavigate } from "react-router-dom";
 import { cambiarPasswordApi } from "../../api/auth";
 import { useAuth } from "./AuthProvider";
 import { ApiError } from "../../api/client";
+import { MarcaLaboratorio } from "../../components/MarcaLaboratorio";
+import { BotonTema } from "../../components/TemaProvider";
 
 export const CambiarPasswordPage: React.FC = () => {
   const { usuario, marcarPasswordCambiado, logout } = useAuth();
@@ -75,8 +77,10 @@ export const CambiarPasswordPage: React.FC = () => {
 
   return (
     <div className="lis-login-container">
+      <header className="lis-login-topline"><span>Hospital Metodista <span aria-hidden="true">/</span> Laboratorio clínico</span><BotonTema /></header>
       <div className="lis-login-card">
         <div className="lis-brand-header">
+          <MarcaLaboratorio />
           <div className="lis-brand-badge">SEGURIDAD</div>
           <h1>Actualización de Contraseña</h1>
           {usuario?.debe_cambiar_password ? (

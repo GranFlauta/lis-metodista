@@ -1,5 +1,5 @@
 """
-Catálogo v1: 9 estudios + 2 perfiles, derivado de `1. FORMATO CENTRAL 2026.xlsx`.
+Catálogo clínico: 13 estudios + 2 perfiles, con ampliaciones del laboratorio.
 
 Fuente única de verdad del catálogo. De aquí se genera el seed SQL
 (`scripts/generar_seed_sql.py`) y se validan las fórmulas en los tests.
@@ -29,6 +29,13 @@ FECHA = "FECHA"
 NEG_POS = ["Negativo", "Positivo"]
 REACTIVO = ["No reactivo", "Reactivo"]
 SEMICUANT = ["Negativo", "Trazas", "+", "++", "+++", "++++"]
+OPCIONES_PROTEINAS = ["Negativo", "Trazas (15 mg/dL)", "+ 30 mg/dL", "++ 100 mg/dL", "+++ 300 mg/dL", "++++ 1000 mg/dL"]
+OPCIONES_GLUCOSA = ["Negativo", "Trazas (50 mg/dL)", "+ 100 mg/dL", "++ 250 mg/dL", "+++ 500 mg/dL", "++++ 1000 mg/dL"]
+OPCIONES_CETONAS = ["Negativo", "Trazas (5 mg/dL)", "+ 15 mg/dL", "++ 40 mg/dL", "+++ 80 mg/dL", "++++ 160 mg/dL"]
+OPCIONES_ESTERASA_LEUCOCITARIA = ["Negativo", "Trazas (15 Leu/µL)", "+ 70 Leu/µL", "++ 125 Leu/µL", "+++ 500 Leu/µL"]
+OPCIONES_PIGMENTOS_BILIARES = ["Negativo", "Trazas (0.5 mg/dL)", "+ 1 mg/dL", "++ 2 mg/dL", "+++ 4 mg/dL"]
+OPCIONES_SANGRE = ["Negativo", "Trazas (10 Eri/µL)", "+ 25 Eri/µL", "++ 80 Eri/µL", "+++ 200 Eri/µL"]
+OPCIONES_UROBILINOGENO = ["Normal", "Aumentado"]
 
 
 @dataclass(frozen=True)
@@ -68,6 +75,8 @@ class Estudio:
     parametros: tuple
     seleccion_parcial: bool = False      # True: se piden por grupo (Inmunoserología)
     reglas: tuple = ()
+    captura: dict = field(default_factory=dict)
+    seleccion_campos: bool = True
 
 
 @dataclass(frozen=True)
@@ -168,6 +177,8 @@ QUIMICA = Estudio(
     "QUIMICA_SANGUINEA", "Química Sanguínea", "Bioquímica",
     parametros=(
         Param("GLICEMIA", "Glicemia", NUMERICO, "mg/dl", decimales=1, rangos=(entre(70, 110, "VR: 70-110"),)),
+        Param("GLICEMIA_POST_PRANDIAL", "Glicemia post prandial", NUMERICO, "mg/dl", decimales=1,
+              rangos=(entre(70, 110, "VR: 70-110"),)),
         Param("CREATININA", "Creatinina", NUMERICO, "mg/dl", decimales=2, rangos=(entre(0.7, 1.4, "VR: 0,7-1,4"),)),
         Param("UREA", "Urea", NUMERICO, "mg/dl", decimales=1, rangos=(entre(17, 42, "VR: 17-42"),)),
         Param("NUS", "NUS", NUMERICO, "mg/dl", decimales=1, rangos=(entre(7, 18, "VR: 7,0-18"),)),
@@ -175,6 +186,10 @@ QUIMICA = Estudio(
               rangos=(entre(2.5, 7.0, "VR: 2,5-7,0", validar=True),)),   # VN.xlsx dice 1,5-7,0
         Param("HBA1C", "HbA1c", NUMERICO, "%", decimales=1,
               rangos=(entre(6.0, 8.3, "VR: 6,0-8,3", validar=True),)),   # no es rango de normalidad estándar
+        Param("ALCOHOLEMIA", "Alcoholemia", NUMERICO, "mg/dL", decimales=2,
+              rangos=(entre(0, 100, "0-100 mg/dL"),)),
+        Param("LDH_QUIMICA", "LDH", NUMERICO, "UI/L", decimales=2,
+              rangos=(entre(200, 400, "200-400 UI/L"),)),
     ),
 )
 
@@ -199,12 +214,12 @@ LIPIDICO = Estudio(
         Param("COLESTEROL", "Colesterol", NUMERICO, "mg/dl", decimales=1, rangos=(menor_a(200, "VR: Menor a 200"),)),
         Param("TRIGLICERIDOS", "Triglicéridos", NUMERICO, "mg/dl", decimales=1, rangos=(entre(10, 150, "VR: 10-150"),)),
         Param("HDL", "HDL-COL", NUMERICO, "mg/dl", decimales=1, rangos=(entre(33, 75, "VR: 33-75"),)),
-        Param("VLDL", "VLDL-COL", CALCULADO, "mg/dl", decimales=2, formula="trigliceridos / 5",
-              rangos=(entre(5, 40, "VR: 5-40"),)),
         # Friedewald: no válido con triglicéridos > 400 mg/dl
         Param("LDL", "LDL-COL", CALCULADO, "mg/dl", decimales=2,
               formula="colesterol - hdl - trigliceridos / 5 if trigliceridos <= 400 else no_calculable()",
               rangos=(entre(10, 160, "VR: 10-160"),)),
+        Param("VLDL", "VLDL-COL", CALCULADO, "mg/dl", decimales=2, formula="trigliceridos / 5",
+              rangos=(entre(5, 40, "VR: 5-40"),)),
     ),
 )
 
@@ -218,9 +233,9 @@ HEPATOGRAMA = Estudio(
               formula="bilirrubina_total - bilirrubina_directa if bilirrubina_directa <= bilirrubina_total else no_calculable()",
               rangos=(hasta(0.8, "VR: Hasta 0,8"),)),
         Param("GOT_AST", "GOT / AST", NUMERICO, "UI/L", decimales=0,
-              rangos=(hasta(37, "VR: Hasta 37", validar=True),)),   # HC-QMC dice 40, VN dice 39
+              rangos=(hasta(40, "VR: Hasta 40"),)),
         Param("GPT_ALT", "GPT / ALT", NUMERICO, "UI/L", decimales=0,
-              rangos=(hasta(45, "VR: Hasta 45", validar=True),)),   # HC-QMC dice 40, VN dice 39
+              rangos=(hasta(40, "VR: Hasta 40"),)),
         Param("FOSFATASA_ALCALINA", "F. Alcalina", NUMERICO, "UI/L", decimales=0,
               rangos=(entre(98, 279, "VR: 98-279", validar=True),)),  # VN dice 25-90
         # Opcional: solo aparece en la plantilla HC-QMC-SERO-PROT del Excel.
@@ -265,23 +280,23 @@ EGO = Estudio(
         Param("PH", "pH", NUMERICO, grupo="FISICO", decimales=1),
         Param("SEDIMENTO", "Sedimento", TEXTO, grupo="FISICO"),
         # Análisis químico (los "Negativo/Normal" del Excel son valores por defecto a confirmar)
-        Param("PROTEINAS", "Proteínas", SELECCION, grupo="QUIMICO", opciones=SEMICUANT, defecto="Negativo", confirmar=True),
-        Param("GLUCOSA", "Glucosa", SELECCION, grupo="QUIMICO", opciones=SEMICUANT, defecto="Negativo", confirmar=True),
-        Param("CETONAS", "Cetonas", SELECCION, grupo="QUIMICO", opciones=SEMICUANT, defecto="Negativo", confirmar=True),
-        Param("ESTERASA_LEUCOCITARIA", "Esterasa leucocitaria", SELECCION, grupo="QUIMICO", opciones=SEMICUANT),
+        Param("PROTEINAS", "Proteínas", SELECCION, grupo="QUIMICO", opciones=OPCIONES_PROTEINAS, defecto="Negativo", confirmar=True),
+        Param("GLUCOSA", "Glucosa", SELECCION, grupo="QUIMICO", opciones=OPCIONES_GLUCOSA, defecto="Negativo", confirmar=True),
+        Param("CETONAS", "Cetonas", SELECCION, grupo="QUIMICO", opciones=OPCIONES_CETONAS, defecto="Negativo", confirmar=True),
+        Param("ESTERASA_LEUCOCITARIA", "Esterasa leucocitaria", SELECCION, grupo="QUIMICO", opciones=OPCIONES_ESTERASA_LEUCOCITARIA, defecto="Negativo", confirmar=True),
         Param("NITRITOS", "Nitritos", SELECCION, grupo="QUIMICO", opciones=NEG_POS, defecto="Negativo", confirmar=True),
         Param("PIGMENTOS_BILIARES", "Pigmentos biliares (bilirrubina)", SELECCION, grupo="QUIMICO",
-              opciones=SEMICUANT, defecto="Negativo", confirmar=True),
+              opciones=OPCIONES_PIGMENTOS_BILIARES, defecto="Negativo", confirmar=True),
         Param("UROBILINOGENO", "Urobilinógeno", SELECCION, grupo="QUIMICO",
-              opciones=["Normal", "Aumentado"], defecto="Normal", confirmar=True),
-        Param("SANGRE", "Sangre", SELECCION, grupo="QUIMICO", opciones=SEMICUANT, defecto="Negativo", confirmar=True),
+              opciones=OPCIONES_UROBILINOGENO, defecto="Normal", confirmar=True),
+        Param("SANGRE", "Sangre", SELECCION, grupo="QUIMICO", opciones=OPCIONES_SANGRE, defecto="Negativo", confirmar=True),
         # Análisis microscópico
         Param("HEMATIES", "Hematíes", RECUENTO, "p/c", grupo="MICROSCOPICO"),
         Param("LEUCOCITOS", "Leucocitos", RECUENTO, "p/c", grupo="MICROSCOPICO"),
         Param("CELULAS_EPITELIALES", "C. epiteliales", RECUENTO, "p/c", grupo="MICROSCOPICO"),
         Param("CRISTALES", "Cristales", TEXTO, grupo="MICROSCOPICO", defecto="No contiene", confirmar=True),
-        Param("BACTERIAS", "Bacterias", TEXTO, grupo="MICROSCOPICO", defecto="Escasa cantidad", confirmar=True),
         Param("CILINDROS", "Cilindros", TEXTO, grupo="MICROSCOPICO", defecto="No contiene", confirmar=True),
+        Param("BACTERIAS", "Bacterias", TEXTO, grupo="MICROSCOPICO", defecto="Escasa cantidad", confirmar=True),
         Param("OTROS", "Otros", TEXTO, grupo="MICROSCOPICO", obligatorio=False),
     ),
 )
@@ -300,30 +315,135 @@ INMUNOSEROLOGIA = Estudio(
         Param("HCG_FUM", "FUM", FECHA, grupo="HCG", obligatorio=False),
         Param("SARS_COV2_AG", "Antígeno SARS-CoV-2", SELECCION, grupo="SARS_COV2", opciones=NEG_POS,
               metodo="Inmunocromatográfico cualitativo de antígeno nasal", muestra="Hisopeado nasofaríngeo"),
-        Param("H_PYLORI_SUERO", "Helicobacter pylori (suero)", SELECCION, grupo="H_PYLORI_SUERO", opciones=NEG_POS, **INMUNO),
-        Param("H_PYLORI_HECES", "Helicobacter pylori (heces)", SELECCION, grupo="H_PYLORI_HECES",
-              opciones=REACTIVO, metodo="Inmunocromatográfico", muestra="Heces"),
-        Param("SANGRE_OCULTA_HECES", "Sangre oculta en heces", SELECCION, grupo="SANGRE_OCULTA",
-              opciones=REACTIVO, metodo="Inmunocromatográfico", muestra="Heces"),
+        Param("TROPONINAS", "Troponinas", SELECCION, grupo="TROPONINAS", opciones=NEG_POS),
         # Semicuantitativas: se registra la dilución (p. ej. 1/24)
-        Param("PCR_DILUCION", "Proteína C Reactiva (semicuantitativa)", TEXTO, "dilución", grupo="PCR_SEMICUANT"),
-        Param("FR_DILUCION", "Factor reumatoideo", TEXTO, "dilución", grupo="FACTOR_REUMATOIDEO"),
-        Param("ASTO_DILUCION", "A.S.T.O.", TEXTO, "dilución", grupo="ASTO"),
-        Param("VDRL_DILUCION", "V.D.R.L.", TEXTO, "dilución", grupo="VDRL"),
+        Param("PCR_DILUCION", "Proteína C Reactiva (semicuantitativa)", TEXTO, "mg/L", grupo="PCR_SEMICUANT"),
+        Param("FR_DILUCION", "Factor reumatoideo", TEXTO, "UI/mL", grupo="FACTOR_REUMATOIDEO"),
+        Param("ASTO_DILUCION", "A.S.T.O.", TEXTO, "UI/mL", grupo="ASTO"),
+        Param("VDRL_DILUCION", "V.D.R.L.", SELECCION, grupo="VDRL", opciones=NEG_POS),
         # Cuantitativa (el Excel decía "ml/L": es mg/L)
         Param("PCR_CUANTITATIVA", "Proteína C Reactiva (cuantitativa)", NUMERICO, "mg/L", grupo="PCR_TURBIDIMETRICA",
               decimales=1, metodo="Turbidimétrico (cuantitativo)", muestra="Suero",
               rangos=(menor_a(5, "VR: menor a 5"),)),
         # Reacción de Widal
-        Param("WIDAL_TIFOIDEA_H", "Tifoidea H", TEXTO, "dilución", grupo="WIDAL"),
-        Param("WIDAL_TIFOIDEA_O", "Tifoidea O", TEXTO, "dilución", grupo="WIDAL"),
-        Param("WIDAL_PARATIFI_A", "Paratifi A", TEXTO, "dilución", grupo="WIDAL"),
-        Param("WIDAL_PARATIFI_B", "Paratifi B", TEXTO, "dilución", grupo="WIDAL"),
+        Param("WIDAL_TIFOIDEA_H", "Tifoidea H", TEXTO, grupo="WIDAL"),
+        Param("WIDAL_TIFOIDEA_O", "Tifoidea O", TEXTO, grupo="WIDAL"),
+        Param("WIDAL_PARATIFI_A", "Paratifi A", TEXTO, grupo="WIDAL"),
+        Param("WIDAL_PARATIFI_B", "Paratifi B", TEXTO, grupo="WIDAL"),
+        Param("H_PYLORI_SUERO", "HELICOBACTER PYLORI", SELECCION,
+              grupo="PARASITOLOGIA", opciones=NEG_POS,
+              metodo="Inmunocromatografico", muestra="Suero"),
+        Param("H_PYLORI_HECES_INMUNO", "HELICOBACTER PYLORI", SELECCION,
+              grupo="PARASITOLOGIA", opciones=REACTIVO,
+              metodo="Inmunocromatografico", muestra="Heces"),
+        Param("SANGRE_OCULTA_HECES_INMUNO", "SANGRE OCULTA EN HECES", SELECCION,
+              grupo="PARASITOLOGIA", opciones=REACTIVO,
+              metodo="Inmunocromatografico", muestra="Heces"),
+        Param("CHAGAS", "CHAGAS", SELECCION, grupo="CHAGAS", opciones=NEG_POS),
+    ),
+    captura={
+        "PCR_DILUCION": {
+            "modo": "CALCULO", "formula": "sensibilidad * factor", "decimales": 6,
+            "diluciones": ["1/2", "1/4", "1/8", "1/16", "1/32", "1/64"],
+            "reactivos": [{"nombre": "MONLAB", "sensibilidad": "6", "unidad": "mg/L"},
+                          {"nombre": "TECO", "sensibilidad": "0.8", "unidad": "mg/dL"}],
+            "personalizable": True, "unidades": ["mg/L", "mg/dL"],
+        },
+        "FR_DILUCION": {
+            "modo": "CALCULO", "formula": "sensibilidad * factor", "decimales": 6,
+            "diluciones": ["1/2", "1/4", "1/8", "1/16", "1/32", "1/64"],
+            "reactivos": [{"nombre": "Estándar", "sensibilidad": "8", "unidad": "UI/mL"}],
+            "personalizable": True, "unidades": ["UI/mL"],
+        },
+        "ASTO_DILUCION": {
+            "modo": "CALCULO", "formula": "sensibilidad * factor", "decimales": 6,
+            "diluciones": ["1/2", "1/4", "1/8", "1/16", "1/32", "1/64"],
+            "reactivos": [{"nombre": "Estándar", "sensibilidad": "200", "unidad": "UI/mL"}],
+            "sin_dilucion": True, "personalizable": True, "unidades": ["UI/mL"],
+        },
+        **{codigo: {"modo": "TITULO", "diluciones": ["1/20", "1/40", "1/80", "1/160", "1/320"]}
+           for codigo in ("WIDAL_TIFOIDEA_H", "WIDAL_TIFOIDEA_O", "WIDAL_PARATIFI_A", "WIDAL_PARATIFI_B")},
+    },
+)
+
+CARDIACO = Estudio(
+    "PERFIL_CARDIACO", "Perfil Cardíaco", "Bioquímica",
+    parametros=(
+        Param("TROPONINA_CARDIACA", "Troponina", SELECCION, grupo="TROPONINA", opciones=NEG_POS),
+        Param("CPK", "CPK", NUMERICO, "UI/L", decimales=2, rangos=(entre(25, 192, "25-192 UI/L"),)),
+        Param("CK_MB", "CK-MB", NUMERICO, "UI/L", decimales=2, rangos=(entre(0, 24, "0-24 UI/L"),)),
+        Param("LDH_CARDIACO", "LDH", NUMERICO, "UI/L", decimales=2,
+              rangos=(entre(200, 400, "200-400 UI/L"),)),
     ),
 )
 
+PANCREATICO = Estudio(
+    "PERFIL_PANCREATICO", "Perfil Pancreático", "Bioquímica",
+    parametros=(
+        Param("AMILASA_SERICA", "Lipasa sérica", NUMERICO, "UI/L", decimales=2,
+              rangos=(entre(10, 150, "10-150 UI/L"),)),
+        Param("LIPASA_SERICA", "Amilasa sérica", NUMERICO, "UA/dL", decimales=2,
+              rangos=(hasta(120, "Hasta 120 UA/dL"),)),
+    ),
+)
+
+MOCO_FECAL_CAMPOS = (
+    ("MOCO_FECAL_ASPECTO", "ASPECTO:"),
+    ("MOCO_FECAL_RESTOS_ALIMENTICIOS", "RESTOS ALIMENTICIOS:"),
+    ("MOCO_FECAL_PH", "PH:"),
+    ("MOCO_FECAL", "MOCO FECAL:"),
+    ("MOCO_FECAL_FLORA_BACTERIANA", "FLORA BACTERIANA:"),
+    ("MOCO_FECAL_ERITROCITOS", "ERITROCITOS:"),
+    ("MOCO_FECAL_LEUCOCITOS", "LEUCOCITOS:"),
+    ("MOCO_FECAL_POLIMORFONUCLEARES", "POLIMORFONUCLEARES:"),
+    ("MOCO_FECAL_MONONUCLEARES", "MONONUCLEARES:"),
+    ("MOCO_FECAL_COPROPARASITOLOGIA", "COPROPARASITOLOGÍA:"),
+)
+
+PARASITOLOGIA = Estudio(
+    "PARASITOLOGIA", "Parasitología", "Parasitología",
+    parametros=(
+        Param("H_PYLORI_HECES", "Helicobacter pylori (heces)", SELECCION,
+              opciones=NEG_POS, metodo="Inmunocromatográfico", muestra="Heces"),
+        Param("SANGRE_OCULTA_HECES", "Sangre oculta en heces", SELECCION,
+              opciones=NEG_POS, metodo="Inmunocromatográfico", muestra="Heces"),
+        *(Param(codigo, nombre, TEXTO, grupo="MOCO_FECAL", muestra="Heces", obligatorio=False)
+          for codigo, nombre in MOCO_FECAL_CAMPOS),
+        Param("COPROPARASITOLOGICO_SIMPLE", "Coproparasitológico simple", TEXTO,
+              grupo="COPROPARASITOLOGICO_SIMPLE", muestra="Heces", obligatorio=False),
+        Param("COPROPARASITOLOGICO_SERIADO", "Coproparasitológico seriado", TEXTO,
+              grupo="COPROPARASITOLOGICO_SERIADO", muestra="Heces", obligatorio=False),
+    ),
+    captura={
+        "listas_texto": ["MOCO_FECAL", "COPROPARASITOLOGICO_SIMPLE"],
+        "textos_sin_limite": [codigo for codigo, _ in MOCO_FECAL_CAMPOS] + ["COPROPARASITOLOGICO_SIMPLE"],
+        "muestras_seriadas": {
+            "COPROPARASITOLOGICO_SERIADO": {
+                "muestras_iniciales": 3,
+                "sugerencia": "No se observan formas parasitarias",
+            },
+        },
+    },
+)
+
+CURVA_FILAS = tuple({
+    "id": codigo, "etiqueta": etiqueta,
+    "hora": f"CURVA_{codigo}_HORA", "glucosa": f"CURVA_{codigo}_GLUCOSA", "fecha": f"CURVA_{codigo}_FECHA",
+} for codigo, etiqueta in (("BASAL", "Basal"), ("PRIMERA", "1.ª"), ("SEGUNDA", "2.ª"), ("TERCERA", "3.ª"), ("CUARTA", "4.ª")))
+CURVA_TOLERANCIA = Estudio(
+    "CURVA_TOLERANCIA", "Curva de tolerancia", "Bioquímica",
+    parametros=tuple(p for fila in CURVA_FILAS for p in (
+        Param(fila["hora"], f"Hora de toma · {fila['etiqueta']}", TEXTO, obligatorio=False),
+        Param(fila["glucosa"], f"Glucosa · {fila['etiqueta']}", NUMERICO, "mg/dL", obligatorio=False,
+              decimales=next(p.decimales for p in QUIMICA.parametros if p.codigo == "GLICEMIA")),
+        Param(fila["fecha"], f"Fecha de toma · {fila['etiqueta']}", FECHA, obligatorio=False),
+    )),
+    captura={"curva_tolerancia": {"titulo": "Curva de tolerancia oral a la glucosa", "unidad": "mg/dL", "filas": list(CURVA_FILAS)}},
+)
+
 ESTUDIOS = (HEMOGRAMA, COAGULOGRAMA, QUIMICA, ELECTROLITOS, LIPIDICO,
-            HEPATOGRAMA, PROTEINOGRAMA, EGO, INMUNOSEROLOGIA)
+            HEPATOGRAMA, PROTEINOGRAMA, EGO, INMUNOSEROLOGIA, CARDIACO, PANCREATICO,
+            PARASITOLOGIA, CURVA_TOLERANCIA)
 
 # ------------------------------------------------------------------- PERFILES
 PERFILES = (

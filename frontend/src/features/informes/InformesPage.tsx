@@ -3,6 +3,8 @@
  * Permite buscar, filtrar y gestionar informes oficiales con folios inmutables.
  */
 import React, { useEffect, useState } from "react";
+import { Icono } from "../../components/Icono";
+import { CargaLaboratorio } from "../../components/MarcaLaboratorio";
 import { Link, useNavigate } from "react-router-dom";
 import { getInformes, moverAPapelera, crearNuevaVersion, InformeItem } from "../../api/informes";
 import { useAuth } from "../auth/AuthProvider";
@@ -86,13 +88,13 @@ export const InformesPage: React.FC = () => {
   const renderBadgeEstado = (estado: string) => {
     switch (estado) {
       case "VIGENTE":
-        return <span className="lis-badge" style={{ backgroundColor: "#dcfce7", color: "#166534" }}>Vigente</span>;
+        return <span className="lis-badge" style={{ backgroundColor: "var(--success-bg)", color: "var(--success)" }}>Vigente</span>;
       case "DESPLAZADO":
-        return <span className="lis-badge" style={{ backgroundColor: "#f1f5f9", color: "#475569" }}>Desplazado</span>;
+        return <span className="lis-badge" style={{ backgroundColor: "var(--bg-hover)", color: "var(--text-muted)" }}>Desplazado</span>;
       case "RECICLAJE":
-        return <span className="lis-badge" style={{ backgroundColor: "#fef3c7", color: "#92400e" }}>En Reciclaje</span>;
+        return <span className="lis-badge" style={{ backgroundColor: "var(--warning-bg)", color: "var(--warning)" }}>En Reciclaje</span>;
       case "PAPELERA":
-        return <span className="lis-badge" style={{ backgroundColor: "#fee2e2", color: "#991b1b" }}>En Papelera</span>;
+        return <span className="lis-badge" style={{ backgroundColor: "var(--error-bg)", color: "var(--error)" }}>En Papelera</span>;
       default:
         return <span className="lis-badge">{estado}</span>;
     }
@@ -158,11 +160,9 @@ export const InformesPage: React.FC = () => {
       )}
 
       {/* Tabla de Informes */}
-      <div className="lis-card" style={{ padding: 0, overflow: "hidden" }}>
+      <div className="lis-card lis-table-responsive" style={{ padding: 0 }}>
         {cargando ? (
-          <div style={{ padding: "40px", textAlign: "center", color: "var(--text-muted)" }}>
-            Cargando informes oficiales…
-          </div>
+          <CargaLaboratorio mensaje="Cargando informes oficiales…" />
         ) : informes.length === 0 ? (
           <div style={{ padding: "40px", textAlign: "center", color: "var(--text-muted)" }}>
             No se encontraron informes oficiales con los criterios seleccionados.
@@ -178,7 +178,7 @@ export const InformesPage: React.FC = () => {
                 <th>Fecha Emisión</th>
                 <th>Firmante Responsable</th>
                 <th>Estado</th>
-                <th style={{ textAlign: "right" }}>Acciones</th>
+                <th style={{ textAlign: "center" }}>Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -206,14 +206,14 @@ export const InformesPage: React.FC = () => {
                     </td>
                     <td style={{ fontSize: "12.5px" }}>{inf.firmante_nombre}</td>
                     <td>{renderBadgeEstado(inf.estado)}</td>
-                    <td style={{ textAlign: "right" }}>
+                    <td style={{ textAlign: "center" }}>
                       <div style={{ display: "inline-flex", gap: "6px" }}>
                         <Link
                           to={`/informes/${inf.folio}`}
                           className="lis-btn lis-btn-sm lis-btn-outline"
                           title="Ver informe oficial listo para imprimir"
                         >
-                          👁️ Ver
+                          <Icono nombre="ojo" size={14} /> Ver
                         </Link>
 
                         {inf.estado === "VIGENTE" && inf.numero_version < 3 && (
@@ -235,7 +235,7 @@ export const InformesPage: React.FC = () => {
                             onClick={() => handleAbrirModal(inf, "papelera")}
                             title="Enviar a papelera con justificación auditada"
                           >
-                            🗑️
+                            <Icono nombre="eliminar" size={14} />
                           </button>
                         )}
                       </div>

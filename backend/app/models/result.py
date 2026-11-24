@@ -27,6 +27,7 @@ class ResultadoBorrador(Base):
     id_parametro = Column(BigInteger, ForeignKey("parametros.id_parametro"), nullable=False, index=True)
     valor_numerico = Column(Numeric(20, 6), nullable=True)
     valor_texto = Column(Text, nullable=True)
+    unidad_override = Column(String(30), nullable=True)
     es_calculado = Column(Boolean, nullable=False, default=False)
     calculable = Column(Boolean, nullable=False, default=True)
     confirmado = Column(Boolean, nullable=False, default=True)

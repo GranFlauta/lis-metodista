@@ -7,6 +7,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from "react";
+import { CargaLaboratorio } from "../../components/MarcaLaboratorio";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { obtenerPacienteApi, PacienteDetalle } from "../../api/pacientes";
 import { listarOrdenesApi, OrdenListItem } from "../../api/ordenes";
@@ -91,8 +92,7 @@ export const PacienteDetallePage: React.FC = () => {
     return (
       <div className="lis-page-container">
         <div className="lis-table-loading">
-          <div className="lis-spinner" style={{ margin: "0 auto 0.5rem" }} />
-          <p>Cargando ficha del paciente...</p>
+          <CargaLaboratorio mensaje="Cargando ficha del paciente…" />
         </div>
       </div>
     );
@@ -174,8 +174,8 @@ export const PacienteDetallePage: React.FC = () => {
             <span
               className="lis-status-badge"
               style={{
-                backgroundColor: paciente.sexo === "M" ? "#e0f2fe" : "#fce7f3",
-                color: paciente.sexo === "M" ? "#0369a1" : "#be185d",
+                backgroundColor: paciente.sexo === "M" ? "var(--info-bg)" : "var(--sero-selected)",
+                color: paciente.sexo === "M" ? "var(--info)" : "var(--sero-accent)",
               }}
             >
               {paciente.sexo === "M" ? "Masculino" : "Femenino"}
@@ -235,8 +235,7 @@ export const PacienteDetallePage: React.FC = () => {
 
         {cargandoOrdenes ? (
           <div className="lis-table-loading" style={{ padding: "2rem" }}>
-            <div className="lis-spinner" style={{ margin: "0 auto 0.5rem" }} />
-            <p>Cargando órdenes del paciente...</p>
+            <CargaLaboratorio mensaje="Cargando órdenes del paciente…" />
           </div>
         ) : ordenes.length === 0 ? (
           <div style={{ padding: "2.5rem 1.5rem", textAlign: "center" }}>
@@ -262,7 +261,7 @@ export const PacienteDetallePage: React.FC = () => {
                   <th style={{ width: "150px" }}>Estado</th>
                   <th>Estudios</th>
                   <th style={{ width: "130px" }}>Fecha</th>
-                  <th style={{ width: "120px", textAlign: "right" }}>Acción</th>
+                  <th style={{ width: "120px" }}>Acción</th>
                 </tr>
               </thead>
               <tbody>

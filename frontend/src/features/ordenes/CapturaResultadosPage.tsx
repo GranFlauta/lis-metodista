@@ -16,7 +16,9 @@
  * - Cero emojis, cero dependencias externas, cero almacenamiento en navegador.
  */
 
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import { EntradaResultadoTexto } from "../../components/EntradaResultadoTexto";
+import { MuestrasSeriadas } from "../../components/MuestrasSeriadas";
 import { useParams, Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import {
@@ -25,7 +27,7 @@ import {
   guardarResultadosApi,
   confirmarDefectosApi,
   getConfiguracionLaboratorioApi,
-  generarVistaPreviaPdfApi,
+  VistaPreviaPayload,
   CapturaOrdenResponse,
   EstudioCaptura,
   SeccionCaptura,
@@ -46,28 +48,19 @@ import {
   EstudioCatalogo,
 } from "../../api/catalogo";
 import { ApiError } from "../../api/client";
-import {
-  generarEstudioCapturaPlantilla,
-  calcularEstudioLocalmente,
-} from "./catalogoEstudiosPlantillas";
-import { formatearResultadoClinico, formatearMilesEntero } from "../../utils/formatoNumerico";
-import { formatoResultadoInmunoserologia } from "../../utils/formatoResultadoInmunoserologia";
+import { CurvaToleranciaCaptura } from "./CurvaToleranciaCaptura";
+import { formatearResultadoClinico } from "../../utils/formatoNumerico";
+import { EntradaResultadoNumerico } from "../../components/EntradaResultadoNumerico";
+import { VistaPreviaInforme } from "../../components/VistaPreviaInforme";
+import { SeccionInmunoserologia } from "./SeccionInmunoserologia";
+import { SeccionGrupoSanguineo } from "./SeccionGrupoSanguineo";
 import {
   ModalEditarRango,
   ModalSeleccionarInmunosero,
 } from "./ModalCapturaHelpers";
 import { publicarOrden } from "../../api/informes";
-
-type EstadoTitulacion = {
-  reactividad: string;
-  dilucion: string;
-  otra: string;
-  lote?: string;
-  vencimiento?: string;
-  controlPositivo?: string;
-  controlNegativo?: string;
-  usado: boolean;
-};
+import { CargaLaboratorio, MarcaLaboratorio } from "../../components/MarcaLaboratorio";
+import { Icono } from "../../components/Icono";
 
 export const CapturaResultadosPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -108,6 +101,10 @@ export const CapturaResultadosPage: React.FC = () => {
   // Valores modificados pendientes de persistir (código -> valor string o null)
   const valoresModificadosRef = useRef<Record<string, string | null>>({});
 
+  const [unidadesForm, setUnidadesForm] = useState<Record<string, string | null>>({});
+  const unidadesFormRef = useRef<Record<string, string | null>>({});
+  const unidadesModificadasRef = useRef<Record<string, string | null>>({});
+
   // Observaciones por estudio y generales de la orden
   const [observacionesEstudios, setObservacionesEstudios] = useState<Record<string, string>>({});
   const observacionesEstudiosRef = useRef<Record<string, string | null>>({});
@@ -131,26 +128,6 @@ export const CapturaResultadosPage: React.FC = () => {
 
   const [modalInmunoAbierto, setModalInmunoAbierto] = useState<boolean>(false);
   const [gruposInmunoseroSeleccionados, setGruposInmunoseroSeleccionados] = useState<Set<string>>(new Set());
-
-  // Estados interactivos inline para PCR Semicuantitativo (sin botón calc ni modal separado)
-  const [pcrReactividad, setPcrReactividad] = useState<"Negativo" | "Positivo">("Negativo");
-  const [pcrReactivo, setPcrReactivo] = useState<"MONLAB" | "TECO" | "CUSTOM">("MONLAB");
-  const [pcrCustomVref, setPcrCustomVref] = useState<string>("< 6 mg/L");
-  const [pcrDilucion, setPcrDilucion] = useState<string>("1/8");
-  const [pcrCustomDilucion, setPcrCustomDilucion] = useState<string>("1/128");
-  const [titulaciones, setTitulaciones] = useState<Record<"ASTO" | "FR", EstadoTitulacion>>({
-    ASTO: { reactividad: "No reactivo", dilucion: "", otra: "", usado: false },
-    FR: { reactividad: "No reactivo", dilucion: "", otra: "", lote: "", vencimiento: "", controlPositivo: "Conforme", controlNegativo: "Conforme", usado: false },
-  });
-
-  // Estado para el visor PDF interactivo a pantalla completa
-  const [zoomPdf, setZoomPdf] = useState<number>(1.0);
-  const [urlPdf, setUrlPdf] = useState<string | null>(null);
-  const [cargandoPdf, setCargandoPdf] = useState(false);
-  const [errorPdf, setErrorPdf] = useState<string | null>(null);
-  const secuenciaPdfRef = useRef(0);
-  const pdfInicialSolicitadoRef = useRef(false);
-  const framePdfRef = useRef<HTMLIFrameElement | null>(null);
 
   // Estados para Publicación Oficial (Fase 4)
   const [modalPublicarAbierto, setModalPublicarAbierto] = useState<boolean>(false);
@@ -177,11 +154,28 @@ export const CapturaResultadosPage: React.FC = () => {
 
   // Desplegable de pendientes en barra superior y pantalla completa de vista previa
   const [mostrarMenuPendientes, setMostrarMenuPendientes] = useState<boolean>(false);
-  const [vistaPreviaFullscreen, setVistaPreviaFullscreen] = useState<boolean>(false);
 
   // Referencias a timers para debounce
   const timerCalcularRef = useRef<number | null>(null);
   const timerGuardarRef = useRef<number | null>(null);
+  const guardadoEnCursoRef = useRef<Promise<void> | null>(null);
+
+  const codigosVistaPrevia = (captura?.estudios || [])
+    .flatMap((estudio) => estudio.secciones.flatMap((seccion) => seccion.parametros))
+    .filter((parametro) => !parametro.es_calculado)
+    .map((parametro) => parametro.codigo).join("|");
+  const payloadVistaPrevia = useMemo<VistaPreviaPayload>(() => {
+    if (esAdmin) return { valores: {} };
+    const permitidos = new Set(codigosVistaPrevia.split("|"));
+    return {
+      valores: Object.fromEntries(Object.entries(valoresForm).filter(([codigo]) => permitidos.has(codigo))),
+      rangos_override: Object.fromEntries(Object.entries(rangosOverride).filter(([codigo]) => codigosParametrosBackendRef.current.has(codigo))),
+      observaciones_estudios: observacionesEstudios,
+      observaciones_orden: observacionesOrden,
+      etiqueta_cayados: etiquetaCayados,
+      unidades_override: Object.fromEntries(Object.entries(unidadesForm).filter(([codigo]) => permitidos.has(codigo))),
+    };
+  }, [esAdmin, codigosVistaPrevia, valoresForm, rangosOverride, observacionesEstudios, observacionesOrden, etiquetaCayados, unidadesForm]);
 
   // Cargar datos iniciales
   useEffect(() => {
@@ -230,6 +224,7 @@ export const CapturaResultadosPage: React.FC = () => {
 
         // Inicializar mapa de valores en formulario
         const mapaInicial: Record<string, string> = {};
+        const unidadesIniciales: Record<string, string | null> = {};
         const overridesIniciales: Record<string, RangoOverrideItem> = {};
         const obsEstudiosIniciales: Record<string, string> = {};
 
@@ -243,12 +238,10 @@ export const CapturaResultadosPage: React.FC = () => {
 
           est.secciones.forEach((sec: SeccionCaptura) => {
             sec.parametros.forEach((p: ParametroCaptura) => {
-              if (!p.es_calculado && p.valor !== null) {
-                mapaInicial[p.codigo] =
-                  p.tipo_campo === "NUMERICO" && p.decimales === 0
-                    ? formatearMilesEntero(p.valor)
-                    : p.valor;
+              if (!p.es_calculado && p.valor !== null && !(p.es_defecto && !p.confirmado)) {
+                mapaInicial[p.codigo] = p.valor;
               }
+              if (p.unidad_editable && p.unidad_modificada) unidadesIniciales[p.codigo] = p.unidad ?? "";
               if (p.referencia?.modificada) {
                 overridesIniciales[p.codigo] = {
                   limite_inferior: p.referencia.inferior,
@@ -262,31 +255,9 @@ export const CapturaResultadosPage: React.FC = () => {
         });
 
         setValoresForm(mapaInicial);
-        const valorGuardado = (codigo: string) => respCaptura.estudios.flatMap((est) => est.secciones.flatMap((sec) => sec.parametros)).find((p) => p.codigo === codigo)?.valor || "";
-        const restaurarTitulacion = (tipo: "ASTO" | "FR", codigo: string) => {
-          const raw = valorGuardado(codigo);
-          if (!raw) return null;
-          const reactivo = raw.startsWith("Reactivo");
-          const dilution = raw.match(/Reactivo\s+(\d+\/\d+)/)?.[1] || "";
-          const opcionesDilucion = ["1/2", "1/4", "1/8", "1/16", "1/32", "1/64"];
-          const esOtraDilucion = Boolean(dilution && !opcionesDilucion.includes(dilution));
-          return {
-            reactividad: reactivo ? "Reactivo" : "No reactivo",
-            dilucion: esOtraDilucion ? "OTRA" : dilution,
-            otra: dilution,
-            ...(tipo === "FR" ? {
-              lote: raw.match(/lote ([^;]+)/)?.[1] === "—" ? "" : raw.match(/lote ([^;]+)/)?.[1] || "",
-              vencimiento: raw.match(/vence ([^;]+)/)?.[1] === "—" ? "" : raw.match(/vence ([^;]+)/)?.[1] || "",
-              controlPositivo: raw.match(/controles \+ ([^,]+)/)?.[1] || "Conforme",
-              controlNegativo: raw.match(/− ([^;]+)/)?.[1] || "Conforme",
-            } : {}),
-            usado: true,
-          };
-        };
-        setTitulaciones((prev) => ({
-          ASTO: restaurarTitulacion("ASTO", "ASTO_DILUCION") || prev.ASTO,
-          FR: restaurarTitulacion("FR", "FR_DILUCION") || prev.FR,
-        }));
+        setUnidadesForm(unidadesIniciales);
+        unidadesFormRef.current = unidadesIniciales;
+        unidadesModificadasRef.current = {};
         setRangosOverride(overridesIniciales);
         rangosOverrideRef.current = overridesIniciales;
 
@@ -347,19 +318,23 @@ export const CapturaResultadosPage: React.FC = () => {
 
   // Scroll automático en barra de pestañas para mantener visible la pestaña activa
   useEffect(() => {
-    if (activeTabRef.current) {
-      activeTabRef.current.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-        inline: "nearest",
-      });
+    const tabs = tabsScrollRef.current;
+    const activeTab = activeTabRef.current;
+    if (!tabs || !activeTab) return;
+
+    const tabsBounds = tabs.getBoundingClientRect();
+    const tabBounds = activeTab.getBoundingClientRect();
+    if (tabBounds.left < tabsBounds.left) {
+      tabs.scrollBy({ left: tabBounds.left - tabsBounds.left, behavior: "smooth" });
+    } else if (tabBounds.right > tabsBounds.right) {
+      tabs.scrollBy({ left: tabBounds.right - tabsBounds.right, behavior: "smooth" });
     }
   }, [estudioActivoCodigo]);
 
   // Manejo de beforeunload: advertir solo si hay cambios sin guardar
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (Object.keys(valoresModificadosRef.current).length > 0) {
+      if (Object.keys(valoresModificadosRef.current).length > 0 || Object.keys(unidadesModificadasRef.current).length > 0) {
         e.preventDefault();
         e.returnValue = "";
       }
@@ -367,17 +342,6 @@ export const CapturaResultadosPage: React.FC = () => {
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, []);
-
-  // Escape para salir de pantalla completa de vista previa
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && vistaPreviaFullscreen) {
-        setVistaPreviaFullscreen(false);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [vistaPreviaFullscreen]);
 
   // Disparar cálculo en vivo (POST /calcular con debounce 400ms)
   const dispararCalculoEnVivo = useCallback(
@@ -395,7 +359,8 @@ export const CapturaResultadosPage: React.FC = () => {
         const resp = await calcularResultadosApi(
           ordenId,
           payloadValores,
-          Object.keys(rangosOverrideRef.current).length > 0 ? rangosOverrideRef.current : undefined
+          Object.keys(rangosOverrideRef.current).length > 0 ? rangosOverrideRef.current : undefined,
+          Object.fromEntries(Object.entries(unidadesFormRef.current).filter(([codigo]) => codigosParametrosBackendRef.current.has(codigo)))
         );
         setCaptura(resp);
         setEstudiosAsignados(resp.estudios);
@@ -409,15 +374,22 @@ export const CapturaResultadosPage: React.FC = () => {
   // Persistir cambios (PUT /resultados con autoguardado 1500ms o botón Guardar ahora)
   const ejecutarGuardado = useCallback(
     async (cambiosPendientes?: Record<string, string | null>) => {
-      if (esAdmin) return;
+      if (esAdmin) return false;
+      while (guardadoEnCursoRef.current) await guardadoEnCursoRef.current;
       const cambios = cambiosPendientes || { ...valoresModificadosRef.current };
+      const overridesEnviados = { ...rangosOverrideRef.current };
+      const obsEstudiosEnviadas = { ...observacionesEstudiosRef.current };
+      const obsOrdenEnviada = observacionesOrdenRef.current;
+      const etiquetasEnviadas = { ...etiquetasEstudiosRef.current };
+      const unidadesEnviadas = { ...unidadesModificadasRef.current };
       const hayCambiosValores = Object.keys(cambios).length > 0;
-      const hayOverrides = Object.keys(rangosOverrideRef.current).length > 0;
-      const hayObsEstudios = Object.keys(observacionesEstudiosRef.current).length > 0;
-      const hayObsOrden = observacionesOrdenRef.current !== null;
-      const hayEtiquetas = Object.keys(etiquetasEstudiosRef.current).length > 0;
+      const hayOverrides = Object.keys(overridesEnviados).length > 0;
+      const hayObsEstudios = Object.keys(obsEstudiosEnviadas).length > 0;
+      const hayObsOrden = obsOrdenEnviada !== null;
+      const hayEtiquetas = Object.keys(etiquetasEnviadas).length > 0;
+      const hayUnidades = Object.keys(unidadesEnviadas).length > 0;
 
-      if (!hayCambiosValores && !hayOverrides && !hayObsEstudios && !hayObsOrden && !hayEtiquetas) return;
+      if (!hayCambiosValores && !hayOverrides && !hayObsEstudios && !hayObsOrden && !hayEtiquetas && !hayUnidades) return true;
 
       const cambiosBackend: Record<string, string | null> = {};
       Object.keys(cambios).forEach((k) => {
@@ -426,39 +398,51 @@ export const CapturaResultadosPage: React.FC = () => {
         }
       });
 
-      if (titulaciones.FR.usado && (titulaciones.FR.controlPositivo !== "Conforme" || titulaciones.FR.controlNegativo !== "Conforme")) {
-        setEstadoGuardado("error");
-        setErrorGuardadoMensaje("No se puede guardar Factor Reumatoideo: ambos controles deben estar conformes.");
-        return;
-      }
-
       setEstadoGuardado("guardando");
       setErrorGuardadoMensaje(null);
+      let liberarGuardado!: () => void;
+      guardadoEnCursoRef.current = new Promise<void>((resolve) => { liberarGuardado = resolve; });
 
       try {
         const resp = await guardarResultadosApi(
           ordenId,
           cambiosBackend,
-          hayOverrides ? rangosOverrideRef.current : undefined,
-          hayObsEstudios ? observacionesEstudiosRef.current : undefined,
-          hayObsOrden ? observacionesOrdenRef.current : undefined,
-          hayEtiquetas ? etiquetasEstudiosRef.current : undefined
+          hayOverrides ? overridesEnviados : undefined,
+          hayObsEstudios ? obsEstudiosEnviadas : undefined,
+          hayObsOrden ? obsOrdenEnviada : undefined,
+          hayEtiquetas ? etiquetasEnviadas : undefined,
+          hayUnidades ? unidadesEnviadas : undefined
         );
         setCaptura(resp);
         setEstudiosAsignados(resp.estudios);
-        setEtiquetaCayados(resp.estudios.find((est) => est.codigo === "HEMOGRAMA")?.etiqueta_cayados || "Cayados");
+        if (etiquetasEstudiosRef.current.HEMOGRAMA === etiquetasEnviadas.HEMOGRAMA) {
+          setEtiquetaCayados(resp.estudios.find((est) => est.codigo === "HEMOGRAMA")?.etiqueta_cayados || "Cayados");
+        }
 
         Object.keys(cambiosBackend).forEach((k) => {
-          delete valoresModificadosRef.current[k];
+          if (valoresModificadosRef.current[k] === cambiosBackend[k]) delete valoresModificadosRef.current[k];
         });
-        observacionesOrdenRef.current = null;
-        observacionesEstudiosRef.current = {};
-        etiquetasEstudiosRef.current = {};
+        if (observacionesOrdenRef.current === obsOrdenEnviada) observacionesOrdenRef.current = null;
+        Object.keys(obsEstudiosEnviadas).forEach((k) => {
+          if (observacionesEstudiosRef.current[k] === obsEstudiosEnviadas[k]) delete observacionesEstudiosRef.current[k];
+        });
+        Object.keys(etiquetasEnviadas).forEach((k) => {
+          if (etiquetasEstudiosRef.current[k] === etiquetasEnviadas[k]) delete etiquetasEstudiosRef.current[k];
+        });
+        Object.keys(unidadesEnviadas).forEach((codigo) => {
+          if (unidadesModificadasRef.current[codigo] === unidadesEnviadas[codigo]) delete unidadesModificadasRef.current[codigo];
+        });
 
         const ahora = new Date();
         const horaStr = ahora.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
         setHoraUltimoGuardado(horaStr);
-        setEstadoGuardado("guardado");
+        const quedanCambios = Object.keys(valoresModificadosRef.current).length > 0
+          || Object.keys(observacionesEstudiosRef.current).length > 0
+          || Object.keys(etiquetasEstudiosRef.current).length > 0
+          || Object.keys(unidadesModificadasRef.current).length > 0
+          || observacionesOrdenRef.current !== null;
+        setEstadoGuardado(quedanCambios ? "modificado" : "guardado");
+        return !quedanCambios;
       } catch (err: unknown) {
         setEstadoGuardado("error");
         if (err instanceof ApiError) {
@@ -466,23 +450,29 @@ export const CapturaResultadosPage: React.FC = () => {
         } else {
           setErrorGuardadoMensaje("Error de conexión al guardar.");
         }
+        return false;
+      } finally {
+        guardadoEnCursoRef.current = null;
+        liberarGuardado();
       }
     },
-    [esAdmin, ordenId, titulaciones]
+    [esAdmin, ordenId]
   );
 
   // Manejar cambio en un campo de entrada
-  const manejarCambioCampo = (codigo: string, nuevoValor: string) => {
+  const manejarCambiosCampos = (cambios: Record<string, string>) => {
     if (esAdmin) return;
 
     const valoresActualizados = {
       ...valoresForm,
-      [codigo]: nuevoValor,
+      ...cambios,
     };
     setValoresForm(valoresActualizados);
 
-    const valorPersistir = nuevoValor.trim() === "" ? null : nuevoValor.trim();
-    valoresModificadosRef.current[codigo] = valorPersistir;
+    Object.entries(cambios).forEach(([codigo, nuevoValor]) => {
+      const valorPersistir = nuevoValor.trim() === "" ? null : nuevoValor.trim();
+      valoresModificadosRef.current[codigo] = valorPersistir;
+    });
     setEstadoGuardado("modificado");
 
     // 1. Debounce 400 ms para Vista Previa en Vivo (POST /calcular)
@@ -496,6 +486,23 @@ export const CapturaResultadosPage: React.FC = () => {
     timerGuardarRef.current = window.setTimeout(() => {
       ejecutarGuardado();
     }, 1500);
+  };
+
+  const manejarCambioCampo = (codigo: string, nuevoValor: string) => {
+    manejarCambiosCampos({ [codigo]: nuevoValor });
+  };
+
+  const manejarCambioUnidad = (codigo: string, unidad: string) => {
+    if (esAdmin) return;
+    const nuevas = { ...unidadesFormRef.current, [codigo]: unidad };
+    unidadesFormRef.current = nuevas;
+    setUnidadesForm(nuevas);
+    unidadesModificadasRef.current[codigo] = unidad.trim();
+    setEstadoGuardado("modificado");
+    if (timerCalcularRef.current) window.clearTimeout(timerCalcularRef.current);
+    timerCalcularRef.current = window.setTimeout(() => dispararCalculoEnVivo(valoresForm), 400);
+    if (timerGuardarRef.current) window.clearTimeout(timerGuardarRef.current);
+    timerGuardarRef.current = window.setTimeout(() => ejecutarGuardado(), 1500);
   };
 
   const manejarCambioEtiquetaCayados = (nuevoValor: string) => {
@@ -601,139 +608,6 @@ export const CapturaResultadosPage: React.FC = () => {
     return formatearResultadoClinico(val, configLab.separador_decimal, decimalesMax);
   };
 
-  // Lógica de cálculo y asignación automática para PCR Semicuantitativo interactivo
-  const calcularResultadoPcr = (
-    reactividad: "Negativo" | "Positivo",
-    reactivo: "MONLAB" | "TECO" | "CUSTOM",
-    dilucion: string,
-    customDil: string,
-    customVref: string
-  ): { resultado: string; vrefTexto: string } => {
-    let sensibilidad = 6;
-    let unidad = "mg/L";
-    let vrefTexto = "< 6 mg/L";
-
-    if (reactivo === "MONLAB") {
-      sensibilidad = 6;
-      unidad = "mg/L";
-      vrefTexto = "< 6 mg/L";
-    } else if (reactivo === "TECO") {
-      sensibilidad = 0.8;
-      unidad = "mg/dL";
-      vrefTexto = "< 0.8 mg/dL";
-    } else {
-      vrefTexto = customVref.trim() || "< 6 mg/L";
-      const matchNum = vrefTexto.match(/[\d.,]+/);
-      sensibilidad = matchNum ? parseFloat(matchNum[0].replace(",", ".")) || 6 : 6;
-      unidad = vrefTexto.includes("mg/dL") ? "mg/dL" : "mg/L";
-    }
-
-    if (reactividad === "Negativo") {
-      return { resultado: "Negativo", vrefTexto };
-    }
-
-    const dilEfectiva = dilucion === "CUSTOM" ? (customDil.trim() || "1/128") : dilucion;
-    const factores: Record<string, number> = {
-      "1/2": 2,
-      "1/4": 4,
-      "1/8": 8,
-      "1/16": 16,
-      "1/32": 32,
-      "1/64": 64,
-    };
-    let factor = factores[dilEfectiva];
-    if (!factor) {
-      if (dilEfectiva.startsWith("1/")) {
-        factor = parseFloat(dilEfectiva.slice(2)) || 1;
-      } else {
-        factor = parseFloat(dilEfectiva) || 1;
-      }
-    }
-
-    const titulo = factor * sensibilidad;
-    const tituloFormateado = formatearResultadoClinico(titulo.toString(), configLab.separador_decimal);
-    const resultado = `Positivo ${dilEfectiva} (${tituloFormateado} ${unidad})`;
-    return { resultado, vrefTexto };
-  };
-
-  const aplicarCambioPcr = (
-    reactividad: "Negativo" | "Positivo",
-    reactivo: "MONLAB" | "TECO" | "CUSTOM",
-    dilucion: string,
-    customDil: string,
-    customVref: string
-  ) => {
-    const { resultado, vrefTexto } = calcularResultadoPcr(reactividad, reactivo, dilucion, customDil, customVref);
-    manejarCambioCampo("PCR_DILUCION", resultado);
-    handleGuardarRangoOverride("PCR_DILUCION", "", "", vrefTexto);
-  };
-
-  const actualizarVistaPreviaPdf = useCallback(async () => {
-    if (!ordenId || esAdmin) return;
-    const secuencia = ++secuenciaPdfRef.current;
-    setCargandoPdf(true);
-    setErrorPdf(null);
-    try {
-      const blob = await generarVistaPreviaPdfApi(ordenId, {
-        valores: valoresForm,
-        rangos_override: rangosOverride,
-        observaciones_estudios: observacionesEstudios,
-        observaciones_orden: observacionesOrden,
-        etiqueta_cayados: etiquetaCayados,
-      });
-      if (secuencia !== secuenciaPdfRef.current) return;
-      const nextUrl = URL.createObjectURL(blob);
-      setUrlPdf((previous) => {
-        if (previous) URL.revokeObjectURL(previous);
-        return nextUrl;
-      });
-    } catch (err) {
-      if (secuencia !== secuenciaPdfRef.current) return;
-      setErrorPdf(err instanceof ApiError ? err.message : "No se pudo generar la vista previa PDF.");
-    } finally {
-      if (secuencia === secuenciaPdfRef.current) setCargandoPdf(false);
-    }
-  }, [ordenId, esAdmin, valoresForm, rangosOverride, observacionesEstudios, observacionesOrden, etiquetaCayados]);
-
-  useEffect(() => () => {
-    if (urlPdf) URL.revokeObjectURL(urlPdf);
-  }, [urlPdf]);
-
-  useEffect(() => {
-    if (!cargando && captura && !pdfInicialSolicitadoRef.current && !esAdmin) {
-      pdfInicialSolicitadoRef.current = true;
-      void actualizarVistaPreviaPdf();
-    }
-  }, [cargando, captura, esAdmin, actualizarVistaPreviaPdf]);
-
-  const actualizarTitulacion = (tipo: "ASTO" | "FR", cambios: Partial<EstadoTitulacion>) => {
-    const actual = titulaciones[tipo];
-    const nuevo = { ...actual, ...cambios, usado: true };
-    setTitulaciones((prev) => ({ ...prev, [tipo]: nuevo }));
-    const sensibilidad = tipo === "ASTO" ? 200 : 8;
-    const unidad = "UI/mL";
-    let resultado = `< ${sensibilidad} ${unidad}`;
-    let detalle = "No reactivo";
-    if (nuevo.reactividad === "Reactivo") {
-      if (!nuevo.dilucion) {
-        resultado = `≥ ${sensibilidad} ${unidad}`;
-        detalle = "Reactivo sin dilución";
-      } else {
-        const textoDilucion = nuevo.dilucion === "OTRA" ? nuevo.otra.trim() : nuevo.dilucion;
-        const factorMatch = textoDilucion.match(/^(?:1\s*\/\s*)?(\d+(?:[.,]\d+)?)$/);
-        const factor = Number(factorMatch?.[1]?.replace(",", ".") || 0);
-        resultado = factor > 0 ? `${formatearResultadoClinico(String(sensibilidad * factor), configLab.separador_decimal)} ${unidad}` : "Dilución inválida";
-        detalle = `Reactivo ${textoDilucion || "(dilución pendiente)"}`;
-      }
-    }
-    const auditoria = tipo === "FR"
-      ? `; lote ${nuevo.lote || "—"}; vence ${nuevo.vencimiento || "—"}; controles + ${nuevo.controlPositivo || "Conforme"}, − ${nuevo.controlNegativo || "Conforme"}`
-      : "";
-    const codigo = tipo === "ASTO" ? "ASTO_DILUCION" : "FR_DILUCION";
-    manejarCambioCampo(codigo, `${detalle}: ${resultado}; sensibilidad ${sensibilidad} ${unidad}${auditoria}`);
-    handleGuardarRangoOverride(codigo, "", "", `Referencia: < ${sensibilidad} ${unidad}`);
-  };
-
   // Renderizar insignia de bandera (UX_GUIDE.md §4: ▲ Alto, ▼ Bajo, Normal, Sin confirmar)
   const renderizarBanderaBadge = (
     bandera: "BAJO" | "NORMAL" | "ALTO" | null,
@@ -781,8 +655,8 @@ export const CapturaResultadosPage: React.FC = () => {
         // En grupo DIFERENCIAL, *_ABS se calcula y muestra en la misma fila del *_PCT
         if (sec.grupo === "DIFERENCIAL" && p.codigo.endsWith("_ABS")) return;
 
-        const v = valoresForm[p.codigo] !== undefined ? valoresForm[p.codigo] : p.valor;
-        const estaLleno = p.es_calculado
+        const v = valoresForm[p.codigo] ?? p.valor;
+        const estaLleno = p.captura_serologia ? Boolean(p.serologia?.completo) : p.es_calculado
           ? (p.calculable && p.valor !== null)
           : (v !== null && v !== undefined && v.trim() !== "");
 
@@ -813,7 +687,7 @@ export const CapturaResultadosPage: React.FC = () => {
   const manejarCambioObservacionOrden = (texto: string) => {
     if (esAdmin) return;
     setObservacionesOrden(texto);
-    observacionesOrdenRef.current = texto.trim() === "" ? null : texto;
+    observacionesOrdenRef.current = texto;
     setEstadoGuardado("modificado");
     if (timerGuardarRef.current) window.clearTimeout(timerGuardarRef.current);
     timerGuardarRef.current = window.setTimeout(() => {
@@ -888,7 +762,7 @@ export const CapturaResultadosPage: React.FC = () => {
       resp.estudios.forEach((est) => {
         est.secciones.forEach((sec) => {
           sec.parametros.forEach((p) => {
-            if (!p.es_calculado && p.valor !== null && nuevoMapaInmuno[p.codigo] === undefined) {
+            if (!p.es_calculado && p.valor !== null && !(p.es_defecto && !p.confirmado) && nuevoMapaInmuno[p.codigo] === undefined) {
               nuevoMapaInmuno[p.codigo] = p.valor;
             }
           });
@@ -936,7 +810,7 @@ export const CapturaResultadosPage: React.FC = () => {
       resp.estudios.forEach((est) => {
         est.secciones.forEach((sec) => {
           sec.parametros.forEach((p) => {
-            if (!p.es_calculado && p.valor !== null && nuevoMapaEstudios[p.codigo] === undefined) {
+            if (!p.es_calculado && p.valor !== null && !(p.es_defecto && !p.confirmado) && nuevoMapaEstudios[p.codigo] === undefined) {
               nuevoMapaEstudios[p.codigo] = p.valor;
             }
           });
@@ -991,6 +865,10 @@ export const CapturaResultadosPage: React.FC = () => {
         });
       });
       codigosParametrosBackendRef.current = backendParams;
+      const unidadesRestantes = Object.fromEntries(Object.entries(unidadesFormRef.current).filter(([codigo]) => backendParams.has(codigo)));
+      unidadesFormRef.current = unidadesRestantes;
+      setUnidadesForm(unidadesRestantes);
+      unidadesModificadasRef.current = Object.fromEntries(Object.entries(unidadesModificadasRef.current).filter(([codigo]) => backendParams.has(codigo)));
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         alert(err.message || "Error al eliminar el estudio de la orden.");
@@ -1004,22 +882,22 @@ export const CapturaResultadosPage: React.FC = () => {
 
   // Publicación Oficial de la Orden (Fase 4)
   const handleAbrirPublicar = async () => {
-    if (Object.keys(valoresModificadosRef.current).length > 0 || observacionesOrdenRef.current !== null) {
-      await ejecutarGuardado();
-    }
     setErrorPublicacion(null);
     setJustificativoUrgenciaPub("");
     setModalPublicarAbierto(true);
   };
 
   const handleConfirmarPublicacion = async () => {
-    if (!observacionesOrden.trim()) {
-      setErrorPublicacion("Las observaciones finales del informe son obligatorias para publicar.");
-      return;
-    }
     setPublicando(true);
     setErrorPublicacion(null);
     try {
+      if (timerGuardarRef.current) window.clearTimeout(timerGuardarRef.current);
+      if (timerCalcularRef.current) window.clearTimeout(timerCalcularRef.current);
+      const guardadoCorrecto = await ejecutarGuardado();
+      if (!guardadoCorrecto) {
+        setErrorPublicacion("No se guardaron todos los cambios. Revise la conexión y vuelva a publicar.");
+        return;
+      }
       const res = await publicarOrden(ordenId, justificativoUrgenciaPub.trim() || undefined);
       setResultadoPublicacion({
         folio: res.folio,
@@ -1048,7 +926,7 @@ export const CapturaResultadosPage: React.FC = () => {
 
   // Navegación: Cambiar de estudio activo (guarda cambios pendientes)
   const cambiarEstudioActivo = (codigo: string) => {
-    if (Object.keys(valoresModificadosRef.current).length > 0) {
+    if (Object.keys(valoresModificadosRef.current).length > 0 || Object.keys(unidadesModificadasRef.current).length > 0) {
       ejecutarGuardado();
     }
     setEstudioActivoCodigo(codigo);
@@ -1077,10 +955,7 @@ export const CapturaResultadosPage: React.FC = () => {
   if (cargando) {
     return (
       <div className="lis-page-container">
-        <div className="lis-table-loading">
-          <div className="lis-spinner" style={{ margin: "0 auto 0.5rem" }} />
-          <p>Cargando plantilla analítica de la orden clínica…</p>
-        </div>
+        <CargaLaboratorio mensaje="Cargando plantilla del estudio…" />
       </div>
     );
   }
@@ -1153,51 +1028,53 @@ export const CapturaResultadosPage: React.FC = () => {
       : pctParam.valor || "";
 
     const absCalculable = absParam?.calculable && absParam?.valor !== null;
-    const absValorStr = absCalculable ? formatearValorVisual(absParam.valor) : "—";
+    const absValorStr = absCalculable
+      ? formatearValorVisual(absParam.valor)
+      : (absParam?.motivo_no_calculable && !absParam.motivo_no_calculable.toLowerCase().includes("falta"))
+      ? "No calculable"
+      : "Esperando datos";
 
     return (
       <tr key={pctParam.codigo}>
-        <td>
+        <td className="lis-sheet-parameter">
           {pctParam.codigo === "CAYADOS_PCT" && !esAdmin ? (
             <input aria-label="Nombre del diferencial" className="lis-captura-input" maxLength={80} value={etiquetaCayados} onChange={(e) => manejarCambioEtiquetaCayados(e.target.value)} style={{ width: 104, fontWeight: 600 }} />
           ) : <span style={{ fontWeight: 600 }}>{nombreDiferencial}</span>}
           {pctParam.obligatorio && <span style={{ color: "var(--error)", marginLeft: "2px" }}>*</span>}
         </td>
-        <td>
-          <div className="lis-diferencial-cell">
-            <input
+        <td className="lis-sheet-entry">
+            <EntradaResultadoNumerico
               id={`input-${pctParam.codigo}`}
-              type="text"
-              inputMode="decimal"
+              separadorDecimal={configLab.separador_decimal}
               className="lis-captura-input is-numeric is-diferencial-pct"
               value={valorPctActual}
-              onChange={(e) => manejarCambioCampo(pctParam.codigo, e.target.value)}
+              onValueChange={(valor) => manejarCambioCampo(pctParam.codigo, valor)}
               onKeyDown={manejarKeyDownInput}
               onFocus={(e) => e.target.select()}
               disabled={esAdmin}
-              placeholder="0"
+              aria-label={`${nombreDiferencial}: relativo (%)`}
               title={`${nombreDiferencial} (%)`}
             />
-            <span style={{ fontSize: "11px", color: "var(--text-muted)", width: "12px" }}>%</span>
-            <span
-              className="lis-captura-calc-box is-diferencial-abs"
+        </td>
+        <td className="lis-sheet-output">
+            <output
+              className={`lis-captura-calc-box is-diferencial-abs ${!absCalculable ? "is-unavailable" : ""}`}
+              htmlFor={`input-${pctParam.codigo}`}
+              aria-label={`${nombreDiferencial}: absoluto calculado`}
               title={absParam ? `${absParam.nombre}: ${absValorStr} mm3` : ""}
             >
               {absValorStr}
-            </span>
-            <span style={{ fontSize: "11px", color: "var(--text-muted)", width: "24px" }}>mm3</span>
-          </div>
+            </output>
         </td>
-        <td style={{ fontSize: "12px", color: "var(--text-muted)" }}>% / mm3</td>
         <td style={{ fontSize: "11.5px", color: "var(--text-muted)" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
+          <div className="lis-sheet-reference">
             <span>{pctParam.referencia?.texto || "—"}</span>
             {!esAdmin && (
               <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
                 {pctParam.referencia?.modificada && (
                   <span
                     className="lis-chip"
-                    style={{ fontSize: "9px", padding: "0 4px", backgroundColor: "#fef3c7", color: "#92400e" }}
+                    style={{ fontSize: "9px", padding: "0 4px", backgroundColor: "var(--warning-bg)", color: "var(--warning)" }}
                     title="Valor de referencia personalizado para esta orden"
                   >
                     Modificado
@@ -1216,18 +1093,20 @@ export const CapturaResultadosPage: React.FC = () => {
                     })
                   }
                   title="Editar valor de referencia para esta orden"
-                  style={{ border: "none", background: "none", cursor: "pointer", fontSize: "11px", padding: "1px 2px" }}
+                  aria-label={`Editar referencia de ${nombreDiferencial}`}
+                  className="lis-sheet-icon-btn"
                 >
-                  ✏️
+                  <Icono nombre="editar" size={13} />
                 </button>
                 {pctParam.referencia?.modificada && (
                   <button
                     type="button"
                     onClick={() => handleReestablecerRango(pctParam.codigo)}
                     title="Reestablecer a valor predeterminado del catálogo"
-                    style={{ border: "none", background: "none", cursor: "pointer", fontSize: "11px", padding: "1px 2px", color: "#b45309" }}
+                    aria-label={`Restablecer referencia de ${nombreDiferencial}`}
+                    className="lis-sheet-icon-btn"
                   >
-                    ↺
+                    <Icono nombre="restaurar" size={13} />
                   </button>
                 )}
               </div>
@@ -1240,183 +1119,119 @@ export const CapturaResultadosPage: React.FC = () => {
   };
 
   // Renderizar fila estándar de parámetro
-  const renderizarFilaParametro = (param: ParametroCaptura) => {
+  const renderizarFilaParametro = (param: ParametroCaptura, soloTexto = false, ocultarNombre = false) => {
     const valorActual = valoresForm[param.codigo] !== undefined
       ? valoresForm[param.codigo]
       : param.valor || "";
 
     return (
-      <tr key={param.codigo}>
-        <td>
+      <tr key={param.codigo} className={param.es_calculado ? "lis-sheet-calculated-row" : undefined}>
+        {!ocultarNombre && <td className="lis-sheet-parameter">
           <span style={{ fontWeight: 600 }}>{param.nombre}</span>
           {param.obligatorio && <span style={{ color: "var(--error)", marginLeft: "2px" }}>*</span>}
-        </td>
-        <td>
+        </td>}
+        <td className={param.es_calculado ? "lis-sheet-output" : "lis-sheet-entry"}>
           {param.es_calculado ? (
             <div style={{ textAlign: "right" }}>
               {param.calculable && param.valor !== null ? (
-                <span className="lis-captura-calc-box" style={{ minWidth: "75px" }}>
+                <output className="lis-captura-calc-box" aria-label={`${param.nombre}: calculado`}>
                   {formatearValorVisual(param.valor)}
-                </span>
+                </output>
               ) : (
-                <span
-                  style={{ color: "#94a3b8", fontStyle: "italic", fontSize: "11.5px" }}
-                  title={param.motivo_no_calculable || "Faltan entradas"}
+                <output
+                  className="lis-captura-calc-box is-unavailable"
+                  title={param.motivo_no_calculable || "Esperando datos de entrada"}
                 >
-                  No calculable
-                </span>
+                  {param.motivo_no_calculable &&
+                  !param.motivo_no_calculable.toLowerCase().includes("falta") &&
+                  param.motivo_no_calculable !== "No calculable"
+                    ? "No calculable"
+                    : "Esperando datos"}
+                </output>
               )}
             </div>
-          ) : param.codigo === "PCR_DILUCION" ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-              <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-                {/* 1. Reactividad: Selección directa */}
-                <select
-                  id={`input-${param.codigo}`}
-                  className="lis-captura-input"
-                  style={{
-                    minWidth: "110px",
-                    fontWeight: 700,
-                    color: pcrReactividad === "Positivo" ? "#b91c1c" : "#15803d",
-                  }}
-                  value={pcrReactividad}
-                  onChange={(e) => {
-                    const nuevaReact = e.target.value as "Negativo" | "Positivo";
-                    setPcrReactividad(nuevaReact);
-                    aplicarCambioPcr(nuevaReact, pcrReactivo, pcrDilucion, pcrCustomDilucion, pcrCustomVref);
-                  }}
-                  disabled={esAdmin}
-                >
-                  <option value="Negativo">Negativo</option>
-                  <option value="Positivo">Positivo</option>
-                </select>
-
-                {/* 2. Reactivo / V. Ref: Dropdown con MONLAB, TECO o Personalizado */}
-                <select
-                  className="lis-captura-input"
-                  style={{ minWidth: "165px", fontSize: "12px" }}
-                  value={pcrReactivo}
-                  onChange={(e) => {
-                    const nuevoReact = e.target.value as "MONLAB" | "TECO" | "CUSTOM";
-                    setPcrReactivo(nuevoReact);
-                    aplicarCambioPcr(pcrReactividad, nuevoReact, pcrDilucion, pcrCustomDilucion, pcrCustomVref);
-                  }}
-                  disabled={esAdmin}
-                  title="Marca de reactivo para valor de referencia"
-                >
-                  <option value="MONLAB">MONLAB (&lt; 6 mg/L)</option>
-                  <option value="TECO">TECO (&lt; 0.8 mg/dL)</option>
-                  <option value="CUSTOM">V. Ref Propio...</option>
-                </select>
-
-                {/* Si es CUSTOM reactivo, ingresar corte */}
-                {pcrReactivo === "CUSTOM" && (
-                  <input
-                    type="text"
-                    className="lis-captura-input"
-                    style={{ width: "125px", fontSize: "12px" }}
-                    placeholder="V. Ref (ej: < 10 mg/L)"
-                    value={pcrCustomVref}
-                    onChange={(e) => {
-                      const txt = e.target.value;
-                      setPcrCustomVref(txt);
-                      aplicarCambioPcr(pcrReactividad, pcrReactivo, pcrDilucion, pcrCustomDilucion, txt);
-                    }}
-                    disabled={esAdmin}
-                  />
-                )}
-
-                {/* 3. Dilución si es Positivo: 1/2 a 1/64 o escribir propio valor (ej. 1/128) */}
-                {pcrReactividad === "Positivo" && (
-                  <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                    <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-muted)" }}>Dilución:</span>
-                    <select
-                      className="lis-captura-input"
-                      style={{ width: "105px", fontSize: "12px", fontWeight: 700 }}
-                      value={pcrDilucion}
-                      onChange={(e) => {
-                        const nuevaDil = e.target.value;
-                        setPcrDilucion(nuevaDil);
-                        aplicarCambioPcr(pcrReactividad, pcrReactivo, nuevaDil, pcrCustomDilucion, pcrCustomVref);
-                      }}
-                      disabled={esAdmin}
-                    >
-                      <option value="1/2">1/2 (x2)</option>
-                      <option value="1/4">1/4 (x4)</option>
-                      <option value="1/8">1/8 (x8)</option>
-                      <option value="1/16">1/16 (x16)</option>
-                      <option value="1/32">1/32 (x32)</option>
-                      <option value="1/64">1/64 (x64)</option>
-                      <option value="CUSTOM">Otro...</option>
-                    </select>
-
-                    {pcrDilucion === "CUSTOM" && (
-                      <input
-                        type="text"
-                        className="lis-captura-input"
-                        style={{ width: "75px", fontSize: "12px" }}
-                        placeholder="1/128"
-                        value={pcrCustomDilucion}
-                        onChange={(e) => {
-                          const customTxt = e.target.value;
-                          setPcrCustomDilucion(customTxt);
-                          aplicarCambioPcr(pcrReactividad, pcrReactivo, pcrDilucion, customTxt, pcrCustomVref);
-                        }}
-                        disabled={esAdmin}
-                      />
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div style={{ fontSize: "11.5px", color: pcrReactividad === "Positivo" ? "#b91c1c" : "var(--text-muted)" }}>
-                <strong>Resultado actual:</strong> {valorActual || (pcrReactividad === "Negativo" ? "Negativo" : "—")}
-              </div>
-            </div>
-          ) : param.codigo === "ASTO_DILUCION" || param.codigo === "FR_DILUCION" ? (() => {
-            const tipo = param.codigo === "ASTO_DILUCION" ? "ASTO" : "FR";
-            const estado = titulaciones[tipo];
-            const actualizar = (cambios: Partial<EstadoTitulacion>) => actualizarTitulacion(tipo, cambios);
-            return (
-              <div className="lis-titulacion-control">
-                <div className="lis-titulacion-fields">
-                  <select className="lis-captura-input" value={estado.reactividad} onChange={(e) => actualizar({ reactividad: e.target.value, dilucion: e.target.value === "Reactivo" ? estado.dilucion : "" })} disabled={esAdmin} aria-label={`${tipo} resultado directo`}>
-                    <option>No reactivo</option><option>Reactivo</option>
-                  </select>
-                  <span className="lis-titulacion-sensitivity">Sensibilidad: {tipo === "ASTO" ? "200" : "8"} UI/mL</span>
-                  {estado.reactividad === "Reactivo" && <>
-                    <select className="lis-captura-input" value={estado.dilucion} onChange={(e) => actualizar({ dilucion: e.target.value })} disabled={esAdmin} aria-label={`${tipo} dilución`}>
-                      <option value="">Sin dilución</option><option value="1/2">1/2</option><option value="1/4">1/4</option><option value="1/8">1/8</option><option value="1/16">1/16</option><option value="1/32">1/32</option><option value="1/64">1/64</option><option value="OTRA">Otra</option>
-                    </select>
-                    {estado.dilucion === "OTRA" && <input className="lis-captura-input" value={estado.otra} onChange={(e) => actualizar({ otra: e.target.value })} placeholder="1/128" disabled={esAdmin} aria-label={`${tipo} otra dilución`} />}
-                  </>}
-                </div>
-                {tipo === "FR" && <div className="lis-titulacion-fields">
-                  <input className="lis-captura-input" value={estado.lote || ""} onChange={(e) => actualizar({ lote: e.target.value })} placeholder="Lote" disabled={esAdmin} aria-label="Lote FR" />
-                  <input className="lis-captura-input" type="date" value={estado.vencimiento || ""} onChange={(e) => actualizar({ vencimiento: e.target.value })} disabled={esAdmin} aria-label="Vencimiento FR" />
-                  <label>Control + <select className="lis-captura-input" value={estado.controlPositivo || "Conforme"} onChange={(e) => actualizar({ controlPositivo: e.target.value })} disabled={esAdmin}><option>Conforme</option><option>No conforme</option></select></label>
-                  <label>Control − <select className="lis-captura-input" value={estado.controlNegativo || "Conforme"} onChange={(e) => actualizar({ controlNegativo: e.target.value })} disabled={esAdmin}><option>Conforme</option><option>No conforme</option></select></label>
-                </div>}
-                <div className="lis-titulacion-result">{valorActual || (tipo === "ASTO" ? "< 200 UI/mL" : "< 8 UI/mL")}</div>
-              </div>
-            );
-          })() : param.tipo_campo === "SELECCION" ? (
-            <select
+          ) : param.tipo_campo === "NUMERICO" ? (
+            <EntradaResultadoNumerico
               id={`input-${param.codigo}`}
-              className="lis-captura-input"
+              className="lis-captura-input is-numeric"
+              separadorDecimal={configLab.separador_decimal}
               value={valorActual}
-              onChange={(e) => manejarCambioCampo(param.codigo, e.target.value)}
+              onValueChange={(valor) => manejarCambioCampo(param.codigo, valor)}
+              onKeyDown={manejarKeyDownInput}
+              onFocus={(event) => event.target.select()}
+              disabled={esAdmin}
+              maxLength={40}
+              aria-label={param.nombre}
+            />
+          ) : param.tipo_campo === "SELECCION" ? (
+            <div className="lis-combo-seleccion" style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+              <input
+                id={`input-${param.codigo}`}
+                type="text"
+                className="lis-captura-input"
+                placeholder={param.valor_defecto || "Elegir o escribir…"}
+                value={valorActual}
+                onChange={(e) => manejarCambioCampo(param.codigo, e.target.value)}
+                onKeyDown={manejarKeyDownInput}
+                onFocus={(e) => e.target.select()}
+                disabled={esAdmin}
+                maxLength={500}
+                aria-label={param.nombre}
+                style={{ flex: 1, minWidth: "120px" }}
+              />
+              {param.opciones && param.opciones.length > 0 && (
+                <select
+                  className="lis-captura-input"
+                  style={{ width: "auto", minWidth: "85px", maxWidth: "150px", padding: "1px 4px", fontSize: "11px", cursor: "pointer" }}
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) manejarCambioCampo(param.codigo, e.target.value);
+                  }}
+                  disabled={esAdmin}
+                  title={`Elegir opción para ${param.nombre}`}
+                  aria-label={`Opciones para ${param.nombre}`}
+                >
+                  <option value="" disabled>▼ Elegir…</option>
+                  {param.opciones.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {!esAdmin && !valorActual && param.valor_defecto && (
+                <button
+                  type="button"
+                  className="lis-sheet-icon-btn lis-sample-accept"
+                  title={`Aceptar sugerencia: ${param.valor_defecto}`}
+                  aria-label={`Aceptar ${param.valor_defecto} para ${param.nombre}`}
+                  onClick={() => manejarCambioCampo(param.codigo, param.valor_defecto || "")}
+                >
+                  <Icono nombre="correcto" size={14} />
+                </button>
+              )}
+              {!esAdmin && valorActual && (
+                <button
+                  type="button"
+                  className="lis-sheet-icon-btn"
+                  title="Restablecer al valor predeterminado"
+                  aria-label={`Restablecer ${param.nombre}`}
+                  onClick={() => manejarCambioCampo(param.codigo, "")}
+                >
+                  <Icono nombre="restaurar" size={14} />
+                </button>
+              )}
+            </div>
+          ) : param.texto_sin_limite ? (
+            <EntradaResultadoTexto
+              id={`input-${param.codigo}`}
+              value={valorActual}
+              onValueChange={(valor) => manejarCambioCampo(param.codigo, valor)}
               onKeyDown={manejarKeyDownInput}
               disabled={esAdmin}
-            >
-              <option value="">--</option>
-              {param.opciones?.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
-          ) : param.tipo_campo === "TEXTO" ? (
+              aria-label={param.nombre}
+            />
+          ) : param.tipo_campo === "TEXTO" || param.tipo_campo === "TEXTO_LIBRE" ? (
             <input
               id={`input-${param.codigo}`}
               type="text"
@@ -1427,6 +1242,7 @@ export const CapturaResultadosPage: React.FC = () => {
               onFocus={(e) => e.target.select()}
               disabled={esAdmin}
               maxLength={500}
+              aria-label={param.nombre}
               placeholder="Observación…"
             />
           ) : param.tipo_campo === "FECHA" ? (
@@ -1438,47 +1254,41 @@ export const CapturaResultadosPage: React.FC = () => {
               onChange={(e) => manejarCambioCampo(param.codigo, e.target.value)}
               onKeyDown={manejarKeyDownInput}
               disabled={esAdmin}
+              aria-label={param.nombre}
             />
           ) : (
             <input
               id={`input-${param.codigo}`}
               type="text"
-              inputMode={param.decimales === 0 ? "numeric" : "decimal"}
               className="lis-captura-input is-numeric"
               value={valorActual}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (param.tipo_campo === "NUMERICO" && param.decimales === 0) {
-                  const formateado = formatearMilesEntero(val);
-                  manejarCambioCampo(param.codigo, formateado);
-                } else {
-                  manejarCambioCampo(param.codigo, val);
-                }
-              }}
+              onChange={(e) => manejarCambioCampo(param.codigo, e.target.value)}
               onKeyDown={manejarKeyDownInput}
               onFocus={(e) => e.target.select()}
               disabled={esAdmin}
               maxLength={param.tipo_campo === "RECUENTO" ? 50 : 25}
-              placeholder={param.tipo_campo === "NUMERICO" ? "0" : ""}
+              aria-label={param.nombre}
             />
           )}
         </td>
-        <td style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-          {["FR_DILUCION", "ASTO_DILUCION"].includes(param.codigo) ? "" : (param.unidad || "—")}
+        {!soloTexto && <><td className={param.unidad_editable ? "lis-sheet-entry" : undefined} style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+          {param.unidad_editable ? <input type="text" className="lis-captura-input"
+            aria-label={`${param.nombre}: unidad`} value={unidadesForm[param.codigo] ?? param.unidad ?? ""}
+            maxLength={30} disabled={esAdmin} onChange={(event) => manejarCambioUnidad(param.codigo, event.target.value)}
+            onKeyDown={manejarKeyDownInput} />
+            : ["FR_DILUCION", "ASTO_DILUCION"].includes(param.codigo) ? "" : (param.unidad || "—")}
         </td>
         <td style={{ fontSize: "11.5px", color: "var(--text-muted)" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" }}>
             <span>
-              {param.codigo === "PCR_DILUCION"
-                ? (param.referencia?.texto || (pcrReactivo === "TECO" ? "< 0.8 mg/dL" : "< 6 mg/L"))
-                : (param.referencia?.texto || "—")}
+              {param.referencia?.texto || "—"}
             </span>
             {!esAdmin && (
               <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
                 {param.referencia?.modificada && (
                   <span
                     className="lis-chip"
-                    style={{ fontSize: "9px", padding: "0 4px", backgroundColor: "#fef3c7", color: "#92400e" }}
+                    style={{ fontSize: "9px", padding: "0 4px", backgroundColor: "var(--warning-bg)", color: "var(--warning)" }}
                     title="Valor de referencia personalizado para esta orden"
                   >
                     Modificado
@@ -1497,68 +1307,85 @@ export const CapturaResultadosPage: React.FC = () => {
                     })
                   }
                   title="Editar valor de referencia para esta orden"
-                  style={{ border: "none", background: "none", cursor: "pointer", fontSize: "11px", padding: "1px 2px" }}
+                  aria-label={`Editar referencia de ${param.nombre}`}
+                  className="lis-sheet-icon-btn"
                 >
-                  ✏️
+                  <Icono nombre="editar" size={13} />
                 </button>
                 {param.referencia?.modificada && (
                   <button
                     type="button"
                     onClick={() => handleReestablecerRango(param.codigo)}
                     title="Reestablecer a valor predeterminado del catálogo"
-                    style={{ border: "none", background: "none", cursor: "pointer", fontSize: "11px", padding: "1px 2px", color: "#b45309" }}
+                    aria-label={`Restablecer referencia de ${param.nombre}`}
+                    className="lis-sheet-icon-btn"
                   >
-                    ↺
+                    <Icono nombre="restaurar" size={13} />
                   </button>
                 )}
               </div>
             )}
           </div>
         </td>
-        <td>{renderizarBanderaBadge(param.bandera, param.es_defecto && !param.confirmado)}</td>
+        <td>{renderizarBanderaBadge(param.bandera, param.es_defecto && !param.confirmado)}</td></>}
       </tr>
     );
   };
 
-  const calcularSumaDiferencial = () => ["SEGMENTADOS_PCT", "LINFOCITOS_PCT", "EOSINOFILOS_PCT", "MONOCITOS_PCT", "CAYADOS_PCT"]
-    .reduce((total, codigo) => {
-      const raw = valoresForm[codigo] ?? "";
-      const value = Number(raw.replace(/\./g, "").replace(",", "."));
-      return total + (raw.trim() && Number.isFinite(value) ? value : 0);
-    }, 0);
-
   // Renderizar sección analítica
   const renderizarSeccion = (sec: SeccionCaptura) => {
+    if (sec.formato === "MUESTRAS_SERIADAS") return <section key={sec.grupo || "muestras"} className="lis-sheet-section">
+      <h4 className="lis-sheet-section-title">{sec.grupo?.replace(/_/g, " ")}</h4>
+      {sec.parametros.map((param) => <MuestrasSeriadas key={param.codigo} parametro={param}
+        valor={valoresForm[param.codigo] ?? param.valor ?? ""} soloLectura={esAdmin}
+        onChange={manejarCambioCampo} onKeyDown={manejarKeyDownInput} />)}
+    </section>;
+    if (estudioActivo?.codigo === "INMUNOSEROLOGIA") return <SeccionInmunoserologia
+      key={sec.grupo || "general"} seccion={sec} valores={valoresForm} soloLectura={esAdmin}
+      separadorDecimal={configLab.separador_decimal} onChange={manejarCambioCampo} onKeyDown={manejarKeyDownInput}
+    />;
+    if (estudioActivo?.codigo === "COAGULOGRAMA" && sec.grupo === "GRUPO_SANGUINEO") return <SeccionGrupoSanguineo
+      key={sec.grupo} seccion={sec} valores={valoresForm} soloLectura={esAdmin}
+      onChange={manejarCambioCampo} onKeyDown={manejarKeyDownInput}
+    />;
+    const esEgoQuimico = estudioActivo?.codigo === "EGO" && sec.grupo === "QUIMICO";
+    if (sec.formato === "SELECCION_SIMPLE" || esEgoQuimico) return (
+      <section key={sec.grupo || "quimica"} className="lis-sheet-section">
+        <h4 className="lis-sheet-section-title">{sec.grupo === "QUIMICO" ? "QUÍMICA" : sec.grupo?.replace(/_/g, " ")}</h4>
+        <table className="lis-captura-tabla lis-lista-texto" aria-label={sec.grupo === "QUIMICO" ? "QUÍMICA" : sec.grupo?.replace(/_/g, " ") || estudioActivo?.nombre}>
+          <thead><tr><th scope="col">Parámetro</th><th scope="col">Resultado</th></tr></thead>
+          <tbody>{sec.parametros.map((param) => renderizarFilaParametro(param, true))}</tbody>
+        </table>
+      </section>
+    );
+    if (sec.formato === "LISTA_TEXTO") {
+      const soloResultado = sec.grupo === "COPROPARASITOLOGICO_SIMPLE";
+      return <section key={sec.grupo || "general"} className="lis-sheet-section">
+        <h4 className="lis-sheet-section-title">{sec.grupo?.replace(/_/g, " ")}</h4>
+        <table className={`lis-captura-tabla lis-lista-texto${soloResultado ? " is-solo-resultado" : ""}`} aria-label={sec.grupo?.replace(/_/g, " ")}>
+          <thead><tr>{!soloResultado && <th scope="col">Campo</th>}<th scope="col">Resultado</th></tr></thead>
+          <tbody>{sec.parametros.map((param) => renderizarFilaParametro(param, true, soloResultado))}</tbody>
+        </table>
+      </section>;
+    }
     const esDiferencial = sec.grupo === "DIFERENCIAL";
-    const sumaDiferencial = esDiferencial ? calcularSumaDiferencial() : 0;
+    const sumaDiferencial = esDiferencial ? estudioActivo?.sumas?.find((suma) => suma.parametros.some((codigo) => sec.parametros.some((parametro) => parametro.codigo === codigo))) : undefined;
 
     return (
-      <div key={sec.grupo || "general"} style={{ marginBottom: "6px" }}>
+      <section key={sec.grupo || "general"} className="lis-sheet-section">
         {sec.grupo && (
-          <div
-            style={{
-              fontSize: "11px",
-              fontWeight: 700,
-              color: "var(--text-muted)",
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              padding: "2px 6px",
-              backgroundColor: "#f8fafc",
-              borderLeft: "3px solid var(--primary)",
-              marginBottom: "2px",
-            }}
-          >
+          <h4 className="lis-sheet-section-title">
             {sec.grupo.replace(/_/g, " ")}
-          </div>
+          </h4>
         )}
-        <table className="lis-captura-tabla">
+        <div className="lis-sheet-scroll"><table className={`lis-captura-tabla ${esDiferencial ? "lis-sheet-differential" : ""}`} aria-label={sec.grupo?.replace(/_/g, " ") || estudioActivo?.nombre}>
           <thead>
             <tr>
-              <th style={{ width: esDiferencial ? "30%" : "32%" }}>Parámetro</th>
-              <th style={{ width: esDiferencial ? "36%" : "28%", textAlign: "right" }}>Resultado</th>
-              <th style={{ width: esDiferencial ? "14%" : "12%" }}>Unidad</th>
-              <th style={{ width: esDiferencial ? "10%" : "16%" }}>V. Ref.</th>
-              <th style={{ width: esDiferencial ? "10%" : "12%" }}>Bandera</th>
+              <th scope="col" style={{ width: esDiferencial ? "26%" : "28%" }}>Parámetro</th>
+              <th scope="col" className="lis-sheet-entry-heading" style={{ width: "22%" }}>{esDiferencial ? "Relativo (%)" : "Resultado"}</th>
+              <th scope="col" style={{ width: esDiferencial ? "20%" : "10%" }}>{esDiferencial ? "Absoluto (/mm³)" : "Unidad"}</th>
+              <th scope="col" style={{ width: esDiferencial ? "18%" : "26%" }}>{esDiferencial ? "V. Ref. (%)" : "V. Ref."}</th>
+              <th scope="col" style={{ width: "14%" }}>Bandera</th>
             </tr>
           </thead>
           <tbody>
@@ -1576,14 +1403,14 @@ export const CapturaResultadosPage: React.FC = () => {
               return renderizarFilaParametro(param);
             })}
           </tbody>
-        </table>
+        </table></div>
         {esDiferencial && (
-          <div className={`lis-diferencial-suma ${sumaDiferencial >= 98 && sumaDiferencial <= 100 ? "is-valid" : "is-warning"}`} aria-live="polite">
-            <strong>Suma del diferencial: {sumaDiferencial.toLocaleString("es-BO", { maximumFractionDigits: 2 })} %</strong>
-            <span>{sumaDiferencial >= 98 && sumaDiferencial <= 100 ? "Dentro del intervalo esperado (98–100 %)" : "Revise el diferencial; el valor esperado es 98–100 %"}</span>
+          <div className={`lis-diferencial-suma ${sumaDiferencial?.valida ? "is-valid" : "is-warning"}`} aria-live="polite">
+            <strong>Suma del diferencial: {formatearValorVisual(sumaDiferencial?.valor)} %</strong>
+            <span>{sumaDiferencial?.valida ? "Diferencial dentro del intervalo esperado" : "Complete o revise el diferencial"}{sumaDiferencial ? ` (${sumaDiferencial.esperado} ± ${sumaDiferencial.tolerancia} %)` : ""}</span>
           </div>
         )}
-      </div>
+      </section>
     );
   };
 
@@ -1622,7 +1449,7 @@ export const CapturaResultadosPage: React.FC = () => {
                 onClick={() => setMostrarMenuPendientes((prev) => !prev)}
                 title="Haga clic para ver los parámetros pendientes"
               >
-                Faltan {completitud.pendientes.length}
+                {completitud.pendientes.length ? `Faltan ${completitud.pendientes.length}` : "Sin resultados"}
               </button>
             )}
 
@@ -1634,7 +1461,7 @@ export const CapturaResultadosPage: React.FC = () => {
                   top: "100%",
                   left: 0,
                   marginTop: "4px",
-                  backgroundColor: "#ffffff",
+                  backgroundColor: "var(--bg-card)",
                   border: "1px solid var(--border-color)",
                   borderRadius: "var(--radius)",
                   boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
@@ -1678,6 +1505,7 @@ export const CapturaResultadosPage: React.FC = () => {
                 className="lis-autosave-indicator"
                 style={{ fontSize: "12.5px", fontWeight: 600 }}
               >
+                {(estadoGuardado === "guardando" || estadoGuardado === "guardado") && <MarcaLaboratorio className="lis-save-mark" />}
                 {estadoGuardado === "guardando" && (
                   <span style={{ color: "var(--primary)" }}>Guardando…</span>
                 )}
@@ -1722,18 +1550,18 @@ export const CapturaResultadosPage: React.FC = () => {
                 <button
                   type="button"
                   className="lis-btn lis-btn-sm"
-                  style={{ backgroundColor: "#15803d", color: "#ffffff", fontWeight: 700 }}
+                  style={{ backgroundColor: "var(--action-bg)", color: "#ffffff", fontWeight: 700 }}
                   onClick={handleAbrirPublicar}
                   disabled={estadoGuardado === "guardando" || publicando}
                   title="Emitir informe oficial con folio secuencial inmutable"
                 >
-                  🚀 Publicar Informe
+                  <Icono nombre="publicar" size={14} /> Publicar informe
                 </button>
               )}
 
               {captura?.orden?.estado_trabajo === "PUBLICADA" && (
                 <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <span className="lis-badge" style={{ backgroundColor: "#dcfce7", color: "#166534", fontWeight: 700 }}>
+                  <span className="lis-badge" style={{ backgroundColor: "var(--success-bg)", color: "var(--success)", fontWeight: 700 }}>
                     ✓ Publicada
                   </span>
                   <Link
@@ -1793,9 +1621,9 @@ export const CapturaResultadosPage: React.FC = () => {
                             <span style={{ fontSize: "14px", fontWeight: 700 }}>
                               {idx + 1}. {estudioActivo.nombre}
                             </span>
-                            <span
+                                <span
                               className="lis-chip"
-                              style={{ fontSize: "11px", padding: "1px 6px", backgroundColor: "#e2e8f0" }}
+                              style={{ fontSize: "11px", padding: "1px 6px", backgroundColor: "var(--bg-muted)" }}
                             >
                               Estudio {idx + 1} de {estudiosAsignados.length}
                             </span>
@@ -1806,9 +1634,9 @@ export const CapturaResultadosPage: React.FC = () => {
                                 style={{
                                   fontSize: "11.5px",
                                   padding: "2px 8px",
-                                  backgroundColor: "#fdf4ff",
-                                  borderColor: "#f0abfc",
-                                  color: "#701a75",
+                                  backgroundColor: "var(--primary-light)",
+                                  borderColor: "var(--primary)",
+                                  color: "var(--primary)",
                                   fontWeight: 700,
                                 }}
                                 onClick={() => {
@@ -1821,7 +1649,7 @@ export const CapturaResultadosPage: React.FC = () => {
                                 }}
                                 title="Configurar qué subestudios de Inmunoserología se incluyen en la orden"
                               >
-                                ⚙️ Subestudios ({estudioActivo.grupos_seleccionados?.length || estudioActivo.secciones.length})
+                                <Icono nombre="ajustes" size={14} /> Subestudios ({estudioActivo.grupos_seleccionados?.length || estudioActivo.secciones.length})
                               </button>
                             )}
                           </div>
@@ -1834,8 +1662,8 @@ export const CapturaResultadosPage: React.FC = () => {
                                 padding: "1px 6px",
                                 backgroundColor:
                                   conteo.completos === conteo.total && conteo.total > 0
-                                    ? "var(--success-bg, #dcfce7)"
-                                    : "#f1f5f9",
+                                    ? "var(--success-bg, var(--success-bg))"
+                                    : "var(--bg-hover)",
                                 color:
                                   conteo.completos === conteo.total && conteo.total > 0
                                     ? "var(--success)"
@@ -1859,7 +1687,7 @@ export const CapturaResultadosPage: React.FC = () => {
                                 onClick={() => handleEliminarEstudio(estudioActivo)}
                                 title="Eliminar este estudio de la orden"
                               >
-                                🗑️ Eliminar estudio
+                                <Icono nombre="eliminar" size={14} /> Eliminar estudio
                               </button>
                             )}
                           </div>
@@ -1886,8 +1714,19 @@ export const CapturaResultadosPage: React.FC = () => {
                   </div>
 
                   {/* Secciones y tabla de captura del estudio activo */}
+                  <div className="lis-sheet-legend"><span><Icono nombre="tabla" size={13} /> Entrada editable</span><span><Icono nombre="calcular" size={13} /> Salida calculada</span><span>Tab / Enter · Siguiente campo</span></div>
                   <div style={{ padding: "6px" }}>
-                    {estudioActivo.secciones.map((sec) => renderizarSeccion(sec))}
+                    {estudioActivo.codigo === "CURVA_TOLERANCIA" ? (
+                      <CurvaToleranciaCaptura
+                        estudio={estudioActivo}
+                        valores={valoresForm}
+                        separadorDecimal={configLab.separador_decimal}
+                        soloLectura={esAdmin}
+                        onChange={manejarCambioCampo}
+                        onChangeMany={manejarCambiosCampos}
+                        onKeyDown={manejarKeyDownInput}
+                      />
+                    ) : estudioActivo.secciones.map((sec) => renderizarSeccion(sec))}
                   </div>
 
                   {/* Observaciones específicas por estudio */}
@@ -1895,7 +1734,7 @@ export const CapturaResultadosPage: React.FC = () => {
                     style={{
                       margin: "12px 6px 6px 6px",
                       padding: "10px",
-                      backgroundColor: "#f8fafc",
+                      backgroundColor: "var(--bg-soft)",
                       borderRadius: "var(--radius)",
                       border: "1px solid var(--border-light)",
                     }}
@@ -1974,7 +1813,7 @@ export const CapturaResultadosPage: React.FC = () => {
                 style={{
                   margin: "12px 6px 6px 6px",
                   padding: "10px",
-                  backgroundColor: "#f1f5f9",
+                  backgroundColor: "var(--bg-hover)",
                   borderRadius: "var(--radius)",
                   border: "1px solid var(--border-color)",
                 }}
@@ -2005,13 +1844,6 @@ export const CapturaResultadosPage: React.FC = () => {
                 onClick={handleAnteriorEstudio}
                 disabled={!puedeAnterior}
                 title="Regresar al estudio asignado previo"
-                style={{
-                  backgroundColor: puedeAnterior ? "#2563eb" : "#e2e8f0",
-                  color: puedeAnterior ? "#ffffff" : "#94a3b8",
-                  borderColor: puedeAnterior ? "#1d4ed8" : "#cbd5e1",
-                  fontWeight: 700,
-                  boxShadow: puedeAnterior ? "0 2px 4px rgba(37,99,235,0.25)" : "none",
-                }}
               >
                 ← Anterior
               </button>
@@ -2094,86 +1926,22 @@ export const CapturaResultadosPage: React.FC = () => {
                 onClick={handleSiguienteEstudio}
                 disabled={!puedeSiguiente}
                 title="Avanzar al siguiente estudio asignado de la orden"
-                style={{
-                  backgroundColor: puedeSiguiente ? "#2563eb" : "#e2e8f0",
-                  color: puedeSiguiente ? "#ffffff" : "#94a3b8",
-                  borderColor: puedeSiguiente ? "#1d4ed8" : "#cbd5e1",
-                  fontWeight: 700,
-                  boxShadow: puedeSiguiente ? "0 2px 4px rgba(37,99,235,0.25)" : "none",
-                }}
               >
                 Siguiente →
               </button>
             </div>
           </div>
 
-          {/* Columna Derecha (≈ 45 %) — Vista Previa en Hojas Tamaño Carta (21,6 × 27,9 cm) */}
+          {/* La vista previa se regenera desde los valores actuales, en hojas Carta. */}
           <div className="lis-captura-vista-previa">
-            <div className="lis-vista-previa-sheet">
-              {/* Barra superior de la vista previa */}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  borderBottom: "1px solid var(--border-light)",
-                  paddingBottom: "8px",
-                  marginBottom: "12px",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <span className="lis-chip" style={{ fontSize: "11px", fontWeight: 700, backgroundColor: "#e0e7ff", color: "#3730a3" }}>
-                    Carta (21,6 × 27,9 cm)
-                  </span>
-                  <span style={{ fontSize: "12px", color: "var(--text-muted)", fontStyle: "italic" }}>
-                    Vista previa de impresión
-                  </span>
-                </div>
-                <div className="lis-pdf-preview-actions">
-                  <button type="button" className="lis-btn lis-btn-outline lis-btn-sm" onClick={() => void actualizarVistaPreviaPdf()} disabled={cargandoPdf || esAdmin}>
-                    {cargandoPdf ? "Actualizando…" : "Actualizar PDF"}
-                  </button>
-                  {urlPdf && <a className="lis-btn lis-btn-secondary lis-btn-sm" href={urlPdf} download={`orden-${ordenId}-preliminar.pdf`}>Descargar</a>}
-                  <button type="button" className="lis-btn lis-btn-secondary lis-btn-sm" onClick={() => setVistaPreviaFullscreen(true)} disabled={!urlPdf} title="Abrir PDF paginado a pantalla completa">
-                    Pantalla completa
-                  </button>
-                </div>
-              </div>
-
-              <div className="lis-pdf-preview-frame" aria-live="polite">
-                {cargandoPdf && <div className="lis-pdf-preview-state">Generando el documento paginado…</div>}
-                {errorPdf && <div className="lis-alert lis-alert-error">{errorPdf}</div>}
-                {!urlPdf && !cargandoPdf && !errorPdf && <div className="lis-pdf-preview-state">La vista previa aparecerá aquí.</div>}
-                {urlPdf && <iframe ref={framePdfRef} title="Vista previa PDF no aprobada" src={`${urlPdf}#toolbar=1&navpanes=1&view=FitH`} />}
-              </div>
-              </div>
-            </div>
-          </div>
-      </form>
-
-      {vistaPreviaFullscreen && (
-        <div className="lis-pdf-simulator-overlay" role="dialog" aria-modal="true" aria-label="Vista previa del PDF preliminar">
-          <div className="lis-pdf-toolbar">
-            <div className="lis-pdf-toolbar-left"><span className="lis-pdf-toolbar-title">Documento preliminar · Orden #{ordenDetalle?.numero_orden_paciente || ordenId}</span></div>
-            <div className="lis-pdf-toolbar-center">
-              <button type="button" className="lis-pdf-tool-btn" onClick={() => setZoomPdf((prev) => Math.max(.5, Number((prev - .1).toFixed(2))))} aria-label="Reducir zoom">−</button>
-              <span className="lis-pdf-zoom-text">{Math.round(zoomPdf * 100)}%</span>
-              <button type="button" className="lis-pdf-tool-btn" onClick={() => setZoomPdf((prev) => Math.min(1.5, Number((prev + .1).toFixed(2))))} aria-label="Aumentar zoom">+</button>
-              <button type="button" className="lis-pdf-tool-btn" onClick={() => setZoomPdf(1)} title="Ajustar al ancho del visor">Ajustar ancho</button>
-            </div>
-            <div className="lis-pdf-toolbar-right">
-              <button type="button" className="lis-pdf-tool-btn" onClick={() => framePdfRef.current?.contentWindow?.print()} disabled={!urlPdf}>Imprimir</button>
-              {urlPdf && <a className="lis-pdf-tool-btn" href={urlPdf} download={`orden-${ordenId}-preliminar.pdf`}>Descargar PDF</a>}
-              <button type="button" className="lis-pdf-tool-btn lis-pdf-close-btn" onClick={() => setVistaPreviaFullscreen(false)}>Cerrar (Esc)</button>
-            </div>
-          </div>
-          <div className="lis-pdf-scroll-area">
-            {cargandoPdf && <div className="lis-pdf-preview-state">Generando el documento paginado…</div>}
-            {errorPdf && <div className="lis-alert lis-alert-error">{errorPdf}</div>}
-            {urlPdf && <iframe ref={framePdfRef} className="lis-pdf-fullscreen-frame" title="PDF preliminar multipágina" src={`${urlPdf}#toolbar=1&navpanes=1&view=FitH`} style={{ transform: `scale(${zoomPdf})`, transformOrigin: "top center" }} />}
+            <VistaPreviaInforme
+              ordenId={ordenId}
+              payload={payloadVistaPrevia}
+              habilitada={!cargando && captura.orden.estado_trabajo !== "PUBLICADA" && ordenDetalle?.estado_trabajo !== "PUBLICADA" && !captura.orden.bloqueada}
+            />
           </div>
         </div>
-      )}
+      </form>
 
       {/* Modales auxiliares */}
       <ModalEditarRango
@@ -2227,15 +1995,15 @@ export const CapturaResultadosPage: React.FC = () => {
             <div className="lis-modal-body">
               {resultadoPublicacion ? (
                 <div style={{ textAlign: "center", padding: "10px 0" }}>
-                  <div style={{ fontSize: "36px", marginBottom: "8px" }}>✅</div>
-                  <h4 style={{ color: "#15803d", marginBottom: "6px" }}>Documento Oficial Emitido</h4>
+                  <MarcaLaboratorio className="lis-publication-mark" />
+                  <h4 style={{ color: "var(--action-bg)", marginBottom: "6px" }}>Documento Oficial Emitido</h4>
                   <div
                     style={{
                       fontFamily: "monospace",
                       fontSize: "20px",
                       fontWeight: 800,
-                      color: "#991b1b",
-                      backgroundColor: "#fef2f2",
+                      color: "var(--error)",
+                      backgroundColor: "var(--error-bg)",
                       padding: "8px 16px",
                       borderRadius: "4px",
                       display: "inline-block",
@@ -2246,20 +2014,17 @@ export const CapturaResultadosPage: React.FC = () => {
                     FOLIO: {resultadoPublicacion.folio}
                   </div>
                   <p style={{ fontSize: "12.5px", color: "var(--text-muted)", lineHeight: 1.5 }}>
-                    Se ha generado el snapshot inmutable y la huella criptográfica SHA-256. El informe ya está disponible para visualización e impresión oficial.
+                    El informe oficial ya está disponible para consulta e impresión con su folio.
                   </p>
                 </div>
               ) : (
                 <>
-                  <p style={{ fontSize: "13px", color: "#334155", marginBottom: "12px", lineHeight: 1.5 }}>
+                  {publicando && <CargaLaboratorio mensaje="Emitiendo el informe oficial…" />}
+                  <p style={{ fontSize: "13px", color: "var(--text-main)", marginBottom: "12px", lineHeight: 1.5 }}>
                     Está a punto de emitir el <strong>informe oficial inmutable</strong>. Una vez publicado, se le asignará un <strong>folio secuencial único</strong> y sus resultados quedarán congelados para impresión.
                   </p>
 
-                  {!observacionesOrden.trim() && (
-                    <div className="lis-alert lis-alert-warning" style={{ fontSize: "12.5px", marginBottom: "12px" }}>
-                      ⚠️ <strong>Atención:</strong> Las observaciones finales de la orden están vacías. Debe ingresar las conclusiones u observaciones del informe antes de poder publicar.
-                    </div>
-                  )}
+                  <p className="lis-input-hint">Se publican únicamente los campos utilizados. Las observaciones son opcionales.</p>
 
                   {errorPublicacion && (
                     <div className="lis-alert lis-alert-error" style={{ fontSize: "12.5px", marginBottom: "12px" }}>
@@ -2294,7 +2059,7 @@ export const CapturaResultadosPage: React.FC = () => {
                   className="lis-btn lis-btn-primary"
                   onClick={() => navigate(`/informes/${resultadoPublicacion.folio}`)}
                 >
-                  📄 Ver e Imprimir Informe Oficial
+                  <Icono nombre="documento" size={16} /> Ver e imprimir informe oficial
                 </button>
               ) : (
                 <>
@@ -2309,9 +2074,9 @@ export const CapturaResultadosPage: React.FC = () => {
                   <button
                     type="button"
                     className="lis-btn"
-                    style={{ backgroundColor: "#15803d", color: "#ffffff", fontWeight: 700 }}
+                    style={{ backgroundColor: "var(--action-bg)", color: "#ffffff", fontWeight: 700 }}
                     onClick={handleConfirmarPublicacion}
-                    disabled={publicando || !observacionesOrden.trim()}
+                    disabled={publicando}
                   >
                     {publicando ? "Emitiendo Folio…" : "Confirmar y Publicar"}
                   </button>

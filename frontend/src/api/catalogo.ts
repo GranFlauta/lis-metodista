@@ -21,6 +21,7 @@ export interface EstudioCatalogo {
   categoria: string;
   seleccion_parcial: boolean;
   grupos?: GrupoEstudioCatalogo[] | null;
+  parametros?: ParametroCatalogo[];
 }
 
 export interface PerfilEstudioItem {

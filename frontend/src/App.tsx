@@ -14,6 +14,8 @@ import { HomePage } from "./features/home/HomePage";
 import { UsuariosPage } from "./features/admin/UsuariosPage";
 import { ConfiguracionSesionPage } from "./features/admin/ConfiguracionSesionPage";
 import { PacientesPage } from "./features/pacientes/PacientesPage";
+import { CatalogoPage } from "./features/catalogo/CatalogoPage";
+import { EstadisticasPage } from "./features/estadisticas/EstadisticasPage";
 import { PacienteDetallePage } from "./features/pacientes/PacienteDetallePage";
 import { OrdenesPage } from "./features/ordenes/OrdenesPage";
 import { NuevaOrdenPage } from "./features/ordenes/NuevaOrdenPage";
@@ -54,6 +56,8 @@ export default function App() {
           >
             <Route index element={<HomePage />} />
             <Route path="pacientes" element={<PacientesPage />} />
+            <Route path="catalogo" element={<CatalogoPage />} />
+            <Route path="estadisticas" element={<EstadisticasPage />} />
             <Route path="pacientes/:id" element={<PacienteDetallePage />} />
             <Route path="ordenes" element={<OrdenesPage />} />
             <Route

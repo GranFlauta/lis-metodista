@@ -1,6 +1,8 @@
+import { Icono } from "../../components/Icono";
 import React, { useState, useEffect } from "react";
 import { EstudioCatalogo } from "../../api/catalogo";
 import { formatearResultadoClinico } from "../../utils/formatoNumerico";
+import { SeleccionSubestudios } from "../../components/EstudiosPerfil";
 
 // --------------------------------------------------------------------------------
 // 1. MODAL EDITAR RANGO DE REFERENCIA (Editable por orden en tiempo real)
@@ -65,7 +67,7 @@ export const ModalEditarRango: React.FC<ModalEditarRangoProps> = ({
     >
       <div
         style={{
-          backgroundColor: "#ffffff",
+          backgroundColor: "var(--bg-card)",
           borderRadius: "var(--radius, 8px)",
           padding: "20px",
           width: "100%",
@@ -89,7 +91,7 @@ export const ModalEditarRango: React.FC<ModalEditarRangoProps> = ({
 
         <div style={{ fontSize: "13px", color: "var(--text-muted)", marginBottom: "16px" }}>
           Parámetro: <strong style={{ color: "var(--text-main)" }}>{parametro.nombre}</strong> ({parametro.codigo})
-          <div style={{ fontSize: "12px", color: "#d97706", marginTop: "4px" }}>
+          <div style={{ fontSize: "12px", color: "var(--warning)", marginTop: "4px" }}>
             * Esta modificación aplica exclusivamente a esta orden sin alterar el catálogo general.
           </div>
         </div>
@@ -144,7 +146,7 @@ export const ModalEditarRango: React.FC<ModalEditarRangoProps> = ({
               className="lis-btn lis-btn-secondary lis-btn-sm"
               onClick={() => onReestablecer(parametro.codigo)}
               title="Volver a los valores predeterminados del catálogo"
-              style={{ color: "#b45309", borderColor: "#fde68a", backgroundColor: "#fef3c7" }}
+              style={{ color: "var(--warning)", borderColor: "var(--warning)", backgroundColor: "var(--warning-bg)" }}
             >
               ↺ Reestablecer al catálogo
             </button>
@@ -187,24 +189,7 @@ export const ModalSeleccionarInmunosero: React.FC<ModalSeleccionarInmunoseroProp
 }) => {
   if (!abierto) return null;
 
-  // Lista canónica de grupos si no viene en catálogo
-  const grupos = estudioInmunoCatalogo?.grupos || [
-    { codigo: "VIH", parametros: [{ codigo: "VIH", nombre: "Serología para VIH" }] },
-    { codigo: "HEPATITIS_A", parametros: [{ codigo: "HEPATITIS_A", nombre: "Hepatitis A" }] },
-    { codigo: "HEPATITIS_B", parametros: [{ codigo: "HEPATITIS_B", nombre: "Hepatitis B" }] },
-    { codigo: "HEPATITIS_C", parametros: [{ codigo: "HEPATITIS_C", nombre: "Hepatitis C" }] },
-    { codigo: "HCG", parametros: [{ codigo: "HCG", nombre: "Gonadotropina coriónica humana" }] },
-    { codigo: "SARS_COV2", parametros: [{ codigo: "SARS_COV2_AG", nombre: "Antígeno SARS-CoV-2" }] },
-    { codigo: "H_PYLORI_SUERO", parametros: [{ codigo: "H_PYLORI_SUERO", nombre: "H. pylori (suero)" }] },
-    { codigo: "H_PYLORI_HECES", parametros: [{ codigo: "H_PYLORI_HECES", nombre: "H. pylori (heces)" }] },
-    { codigo: "SANGRE_OCULTA", parametros: [{ codigo: "SANGRE_OCULTA_HECES", nombre: "Sangre oculta en heces" }] },
-    { codigo: "PCR_SEMICUANT", parametros: [{ codigo: "PCR_DILUCION", nombre: "PCR Semicuantitativa" }] },
-    { codigo: "FACTOR_REUMATOIDEO", parametros: [{ codigo: "FR_DILUCION", nombre: "Factor reumatoideo" }] },
-    { codigo: "ASTO", parametros: [{ codigo: "ASTO_DILUCION", nombre: "A.S.T.O." }] },
-    { codigo: "VDRL", parametros: [{ codigo: "VDRL_DILUCION", nombre: "V.D.R.L." }] },
-    { codigo: "PCR_TURBIDIMETRICA", parametros: [{ codigo: "PCR_CUANTITATIVA", nombre: "PCR Cuantitativa" }] },
-    { codigo: "WIDAL", parametros: [{ codigo: "WIDAL_TIFOIDEA_H", nombre: "Reacción de Widal" }] },
-  ];
+  const grupos = estudioInmunoCatalogo?.grupos || [];
 
   return (
     <div
@@ -225,7 +210,7 @@ export const ModalSeleccionarInmunosero: React.FC<ModalSeleccionarInmunoseroProp
     >
       <div
         style={{
-          backgroundColor: "#ffffff",
+          backgroundColor: "var(--bg-card)",
           borderRadius: "var(--radius, 8px)",
           padding: "20px",
           width: "100%",
@@ -239,8 +224,8 @@ export const ModalSeleccionarInmunosero: React.FC<ModalSeleccionarInmunoseroProp
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ fontSize: "20px" }}>🌸</span>
-            <h3 style={{ margin: 0, fontSize: "17px", color: "#701a75" }}>
+            <Icono nombre="ajustes" size={20} />
+            <h3 style={{ margin: 0, fontSize: "17px", color: "var(--primary)" }}>
               Subestudios de Inmunoserología
             </h3>
           </div>
@@ -260,40 +245,9 @@ export const ModalSeleccionarInmunosero: React.FC<ModalSeleccionarInmunoseroProp
         {/* Casillas rosas (lis-inmunosero-dropdown y lis-inmunosero-grid) */}
         <div
           className="lis-inmunosero-dropdown"
-          style={{ overflowY: "auto", flex: 1, maxHeight: "60vh", padding: "12px", border: "1px solid #f0abfc" }}
+          style={{ overflowY: "auto", flex: 1, maxHeight: "60vh", padding: "12px", border: "1px solid var(--primary)" }}
         >
-          <div className="lis-inmunosero-grid">
-            {grupos.map((g) => {
-              const marcado = gruposSeleccionados.has(g.codigo);
-              const etiqueta = g.codigo.replace(/_/g, " ");
-              const paramsTexto = g.parametros.map((p) => p.nombre).join(", ");
-
-              return (
-                <label
-                  key={g.codigo}
-                  className={`lis-inmunosero-item ${marcado ? "selected" : ""}`}
-                  style={{ cursor: "pointer", userSelect: "none" }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleGrupo(g.codigo);
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                    <input
-                      type="checkbox"
-                      checked={marcado}
-                      onChange={() => onToggleGrupo(g.codigo)}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                    <strong style={{ color: marcado ? "#701a75" : "inherit" }}>{etiqueta}</strong>
-                  </div>
-                  <span style={{ fontSize: "11px", color: "var(--text-muted)", paddingLeft: "20px" }}>
-                    {paramsTexto}
-                  </span>
-                </label>
-              );
-            })}
-          </div>
+          <SeleccionSubestudios grupos={grupos} seleccionados={gruposSeleccionados} onToggle={onToggleGrupo} />
         </div>
 
         <div
@@ -317,7 +271,7 @@ export const ModalSeleccionarInmunosero: React.FC<ModalSeleccionarInmunoseroProp
             <button
               type="button"
               className="lis-btn lis-btn-primary"
-              style={{ backgroundColor: "#c026d3", borderColor: "#a21caf" }}
+              style={{ backgroundColor: "var(--action-bg)", borderColor: "var(--action-bg)" }}
               onClick={onGuardar}
             >
               Guardar Subestudios
@@ -404,7 +358,7 @@ export const ModalCalculadorPcr: React.FC<ModalCalculadorPcrProps> = ({
     >
       <div
         style={{
-          backgroundColor: "#ffffff",
+          backgroundColor: "var(--bg-card)",
           borderRadius: "var(--radius, 8px)",
           padding: "20px",
           width: "100%",
@@ -455,7 +409,7 @@ export const ModalCalculadorPcr: React.FC<ModalCalculadorPcrProps> = ({
 
         {/* 2. Si es positivo, seleccionar reactivo y dilución */}
         {criterio === "Positivo" && (
-          <div style={{ padding: "10px", backgroundColor: "#f8fafc", borderRadius: "var(--radius)", marginBottom: "12px", border: "1px solid var(--border-light)" }}>
+          <div style={{ padding: "10px", backgroundColor: "var(--bg-soft)", borderRadius: "var(--radius)", marginBottom: "12px", border: "1px solid var(--border-light)" }}>
             <div style={{ marginBottom: "10px" }}>
               <label style={{ display: "block", fontSize: "12px", fontWeight: 600, marginBottom: "4px" }}>
                 2. Marca del reactivo (Sensibilidad):
@@ -512,16 +466,16 @@ export const ModalCalculadorPcr: React.FC<ModalCalculadorPcrProps> = ({
         <div
           style={{
             padding: "10px",
-            backgroundColor: criterio === "Positivo" ? "#fef2f2" : "#f0fdf4",
+            backgroundColor: criterio === "Positivo" ? "var(--error-bg)" : "var(--success-bg)",
             borderRadius: "var(--radius)",
             marginBottom: "16px",
-            border: `1px solid ${criterio === "Positivo" ? "#fecaca" : "#bbf7d0"}`,
+            border: `1px solid ${criterio === "Positivo" ? "var(--error)" : "var(--success)"}`,
           }}
         >
           <div style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: 700 }}>
             Resultado final a registrar:
           </div>
-          <div style={{ fontSize: "15px", fontWeight: 700, color: criterio === "Positivo" ? "#b91c1c" : "#15803d", marginTop: "2px" }}>
+          <div style={{ fontSize: "15px", fontWeight: 700, color: criterio === "Positivo" ? "var(--error)" : "var(--success)", marginTop: "2px" }}>
             {resultadoFinal}
           </div>
           {criterio === "Positivo" && (

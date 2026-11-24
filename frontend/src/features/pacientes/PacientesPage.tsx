@@ -11,12 +11,12 @@
  */
 
 import React, { useCallback, useEffect, useState } from "react";
+import { CargaLaboratorio } from "../../components/MarcaLaboratorio";
 import { useNavigate } from "react-router-dom";
 import { listarPacientesApi, PacienteDetalle } from "../../api/pacientes";
 import { ApiError } from "../../api/client";
 import { useAuth } from "../auth/AuthProvider";
 import { PacienteFormModal } from "./PacienteFormModal";
-import { CatalogoModal } from "./CatalogoModal";
 
 export const PacientesPage: React.FC = () => {
   const { usuario } = useAuth();
@@ -42,7 +42,6 @@ export const PacientesPage: React.FC = () => {
   // Modales
   const [modalFormAbierto, setModalFormAbierto] = useState<boolean>(false);
   const [pacienteEditando, setPacienteEditando] = useState<PacienteDetalle | null>(null);
-  const [modalCatalogoAbierto, setModalCatalogoAbierto] = useState<boolean>(false);
 
   // Debounce de 300 ms en el buscador (§6.6)
   useEffect(() => {
@@ -150,15 +149,6 @@ export const PacientesPage: React.FC = () => {
         </div>
 
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-          <button
-            type="button"
-            className="lis-btn lis-btn-outline"
-            onClick={() => setModalCatalogoAbierto(true)}
-            title="Ver catálogo de estudios y perfiles clínicos"
-          >
-            Ver catálogo
-          </button>
-
           {!esAdmin && (
             <button
               type="button"
@@ -298,15 +288,14 @@ export const PacientesPage: React.FC = () => {
                 <th style={{ width: "85px" }}>Sexo</th>
                 <th style={{ width: "115px" }}>Teléfono</th>
                 <th style={{ width: "130px" }}>Pendientes</th>
-                <th style={{ width: "210px", textAlign: "right" }}>Acciones</th>
+                <th style={{ width: "210px", textAlign: "center" }}>Acciones</th>
               </tr>
             </thead>
             <tbody>
               {cargando ? (
                 <tr>
                   <td colSpan={7} className="lis-table-loading">
-                    <div className="lis-spinner" style={{ margin: "0 auto 0.5rem" }} />
-                    <p>Consultando base de pacientes…</p>
+                    <CargaLaboratorio mensaje="Consultando base de pacientes…" />
                   </td>
                 </tr>
               ) : pacientes.length === 0 ? (
@@ -350,8 +339,8 @@ export const PacientesPage: React.FC = () => {
                         <span
                           className="lis-status-badge"
                           style={{
-                            backgroundColor: p.sexo === "M" ? "#e0f2fe" : "#fce7f3",
-                            color: p.sexo === "M" ? "#0369a1" : "#be185d",
+                            backgroundColor: p.sexo === "M" ? "var(--info-bg)" : "var(--sero-selected)",
+                            color: p.sexo === "M" ? "var(--info)" : "var(--sero-accent)",
                             fontSize: "11.5px",
                             padding: "1px 6px",
                           }}
@@ -376,7 +365,7 @@ export const PacientesPage: React.FC = () => {
                         )}
                       </td>
                       <td className="lis-text-right">
-                        <div className="lis-actions-cell" style={{ justifyContent: "flex-end", gap: "4px" }}>
+                        <div className="lis-actions-cell" style={{ justifyContent: "center", gap: "4px" }}>
                           {!esAdmin && (
                             <button
                               type="button"
@@ -472,11 +461,6 @@ export const PacientesPage: React.FC = () => {
         onVerPacienteExistente={handleNavegarExistente}
       />
 
-      {/* Modal de Catálogo Clínico */}
-      <CatalogoModal
-        abierto={modalCatalogoAbierto}
-        onCerrar={() => setModalCatalogoAbierto(false)}
-      />
     </div>
   );
 };

@@ -11,6 +11,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from "react";
+import { CargaLaboratorio } from "../../components/MarcaLaboratorio";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   descartarOrdenApi,
@@ -242,7 +243,7 @@ export const OrdenesPage: React.FC = () => {
             background: "transparent",
             border: "none",
             borderBottom: pestanaActiva === "INCOMPLETO" ? "2px solid var(--warning)" : "2px solid transparent",
-            color: pestanaActiva === "INCOMPLETO" ? "#b45309" : "var(--text-muted)",
+            color: pestanaActiva === "INCOMPLETO" ? "var(--warning)" : "var(--text-muted)",
             fontWeight: pestanaActiva === "INCOMPLETO" ? 700 : 500,
             padding: "8px 16px",
             fontSize: "13.5px",
@@ -329,15 +330,14 @@ export const OrdenesPage: React.FC = () => {
                 <th style={{ width: "135px" }}>Hora de inicio</th>
                 <th style={{ width: "135px" }}>Creado</th>
                 {esAdmin && <th style={{ width: "130px" }}>Autor</th>}
-                <th style={{ width: "230px", textAlign: "right" }}>Acciones</th>
+                <th style={{ width: "230px", textAlign: "center" }}>Acciones</th>
               </tr>
             </thead>
             <tbody>
               {cargando ? (
                 <tr>
                   <td colSpan={esAdmin ? 7 : 6} className="lis-table-loading">
-                    <div className="lis-spinner" style={{ margin: "0 auto 0.5rem" }} />
-                    <p>Consultando órdenes clínicas…</p>
+                    <CargaLaboratorio mensaje="Consultando órdenes clínicas…" />
                   </td>
                 </tr>
               ) : ordenes.length === 0 ? (
@@ -372,7 +372,7 @@ export const OrdenesPage: React.FC = () => {
                       </div>
                     </td>
                     <td>
-                      <div style={{ display: "flex", gap: "4px", alignItems: "center", flexWrap: "wrap" }}>
+                      <div className="lis-table-statuses">
                         <span
                           className={`lis-status-badge ${
                             o.estado_trabajo === "COMPLETO"
@@ -410,7 +410,7 @@ export const OrdenesPage: React.FC = () => {
                       </td>
                     )}
                     <td className="lis-text-right">
-                      <div className="lis-actions-cell" style={{ justifyContent: "flex-end", gap: "4px" }}>
+                      <div className="lis-actions-cell" style={{ justifyContent: "center", gap: "4px" }}>
                         {/* Acción principal: Continuar captura */}
                         <button
                           type="button"

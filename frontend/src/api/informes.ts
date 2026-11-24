@@ -2,6 +2,7 @@
  * API client para Informes Oficiales, Publicación, Versiones y Papelera Lógica.
  */
 import { apiClient } from './client';
+import type { VistaPreviaInforme } from './resultados';
 
 export interface InformeItem {
   id_informe: number;
@@ -41,6 +42,7 @@ export interface InformeDetalle {
   justificativo?: string | null;
   publicado_en: string;
   snapshot_json: Record<string, any>;
+  estudios_informe: any[];
   snapshot_sha256: string;
   firmante: {
     id_usuario: number;
@@ -123,14 +125,18 @@ export async function getPapelera(filtros?: {
   return apiClient<PapeleraItem[]>(`/api/informes/papelera${query}`, { method: 'GET' });
 }
 
-export async function getInforme(folio: string, version?: number): Promise<InformeDetalle> {
+export async function getInforme(folio: string, version?: number, signal?: AbortSignal): Promise<InformeDetalle> {
   const query = version ? `?version=${version}` : '';
-  return apiClient<InformeDetalle>(`/api/informes/${folio}${query}`, { method: 'GET' });
+  return apiClient<InformeDetalle>(`/api/informes/${encodeURIComponent(folio)}${query}`, { method: 'GET', signal });
 }
 
-export async function descargarPdfInforme(folio: string, version?: number): Promise<Blob> {
+export async function descargarPdfInforme(folio: string, version?: number, signal?: AbortSignal): Promise<Blob> {
   const query = version ? `?version=${version}` : "";
-  return apiClient<Blob>(`/api/informes/${encodeURIComponent(folio)}/pdf${query}`, { method: "GET", responseType: "blob" });
+  return apiClient<Blob>(`/api/informes/${encodeURIComponent(folio)}/pdf${query}`, { method: "GET", responseType: "blob", signal });
+}
+
+export async function getVistaInforme(folio: string, version: number, signal?: AbortSignal): Promise<VistaPreviaInforme> {
+  return apiClient<VistaPreviaInforme>(`/api/informes/${encodeURIComponent(folio)}/vista-previa?version=${version}`, { signal });
 }
 
 export async function getHistorialInforme(folio: string): Promise<InformeEvento[]> {

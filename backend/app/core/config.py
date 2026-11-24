@@ -10,17 +10,14 @@ class Settings(BaseSettings):
     database_url: str
     jwt_secret: str
     heartbeat_interval_seconds: int = 30
-    session_dead_after_seconds: int = 86400     # 24 horas (sin latidos no muere en 150s)
-    idle_timeout_minutes: int = 1440            # 24 horas (inactividad)
-    absolute_session_hours: int = 24            # 24 horas (tope duro)
-
-    access_token_minutes: int = 1440            # 24 horas (token no expira cada 10 min)
+    access_token_minutes: int = 10
+    modo_produccion: bool = False
+    session_idle_timeout_minutes: int = 60
+    session_absolute_timeout_hours: int = 24
     max_login_attempts: int = 5
     lockout_minutes: int = 15
-    cookie_secure: bool = False                 # False en desarrollo local y demo HTTP
-    enable_docs: bool = False                   # D35-01: /docs y /openapi.json solo si es true
-    modo_demo: bool = False                     # Habilita /docs, CORS y SPA para presentaciones por ngrok
-    sesion_indefinida: bool = False             # Si es true, la sesión no expira por inactividad ni falta de latidos
+    cookie_secure: bool = False
+    enable_docs: bool = False
 
     @model_validator(mode="after")
     def validate_jwt_secret(self) -> Settings:
@@ -28,17 +25,13 @@ class Settings(BaseSettings):
             raise ValueError(
                 "JWT_SECRET inválido: debe tener al menos 32 caracteres y no comenzar con 'CAMBIAR'."
             )
+        if not 1 <= self.session_idle_timeout_minutes <= 480:
+            raise ValueError("SESSION_IDLE_TIMEOUT_MINUTES debe estar entre 1 y 480.")
+        if not 1 <= self.session_absolute_timeout_hours <= 24:
+            raise ValueError("SESSION_ABSOLUTE_TIMEOUT_HOURS debe estar entre 1 y 24.")
+        if self.modo_produccion and not self.cookie_secure:
+            raise ValueError("COOKIE_SECURE debe ser true cuando MODO_PRODUCCION=true.")
         return self
 
 settings = Settings()  # type: ignore[call-arg]
-
-
-def es_modo_demo() -> bool:
-    """Indica si el modo extendido está activo fuera de pruebas unitarias."""
-    import sys
-    en_pruebas = "unittest" in sys.modules or "pytest" in sys.modules
-    if en_pruebas:
-        return False
-    # En ejecución real de la aplicación: siempre activo (sesión de 24 horas y túnel demo)
-    return True
 

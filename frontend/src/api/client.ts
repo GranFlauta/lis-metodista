@@ -35,6 +35,7 @@ let inMemoryAccessToken: string | null = null;
 // Callbacks para eventos globales del ciclo de sesión
 let onSessionExpiredCallback: (() => void) | null = null;
 let onMustChangePasswordCallback: (() => void) | null = null;
+let refreshInFlight: Promise<string> | null = null;
 
 export function setAccessToken(token: string | null): void {
   inMemoryAccessToken = token;
@@ -52,20 +53,64 @@ export function setOnMustChangePassword(callback: () => void): void {
   onMustChangePasswordCallback = callback;
 }
 
+async function renewAccessToken(): Promise<string> {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      const response = await fetch("/api/auth/refresh", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-LIS-Client": "web",
+        },
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        let errorData: ErrorResponse;
+        try {
+          errorData = await response.json();
+        } catch {
+          errorData = {
+            codigo: "ERROR_DESCONOCIDO",
+            mensaje: response.statusText || `Error HTTP ${response.status}`,
+          };
+        }
+        throw new ApiError(response.status, errorData.codigo, errorData.mensaje, errorData);
+      }
+
+      const refreshData = (await response.json()) as { access_token: string };
+      setAccessToken(refreshData.access_token);
+      return refreshData.access_token;
+    })().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
 interface RequestOptions extends RequestInit {
   retryOnSessionExpired?: boolean;
   responseType?: "json" | "blob";
 }
 
+let pendientesRed = 0;
+const observadoresRed = new Set<(pendientes: number) => void>();
+export function observarActividadRed(observador: (pendientes: number) => void) {
+  observadoresRed.add(observador);
+  observador(pendientesRed);
+  return () => { observadoresRed.delete(observador); };
+}
+function notificarActividad(cambio: number) {
+  pendientesRed += cambio;
+  observadoresRed.forEach((observador) => observador(pendientesRed));
+}
+
 export async function apiClient<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+  notificarActividad(1);
+  try {
   const { retryOnSessionExpired = true, responseType = "json", ...fetchOptions } = options;
 
   const headers = new Headers(fetchOptions.headers || {});
-
-  // Omitir pantalla de advertencia de ngrok en túneles de demostración
-  if (!headers.has("ngrok-skip-browser-warning")) {
-    headers.set("ngrok-skip-browser-warning", "true");
-  }
 
   // Adjuntar cabecera CSRF requerida en refresh y logout (§5)
   if (endpoint.includes("/api/auth/refresh") || endpoint.includes("/api/auth/logout")) {
@@ -122,42 +167,31 @@ export async function apiClient<T>(endpoint: string, options: RequestOptions = {
       !endpoint.includes("/api/auth/login")
     ) {
       try {
-        const refreshResponse = await fetch("/api/auth/refresh", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-LIS-Client": "web",
-          },
-          credentials: "include",
-        });
-
-        if (refreshResponse.ok) {
-          const refreshData = await refreshResponse.json();
-          setAccessToken(refreshData.access_token);
-          // Reintentar la petición original UNA sola vez con el nuevo token
-          return apiClient<T>(endpoint, {
-            ...options,
-            retryOnSessionExpired: false,
-          });
+        await renewAccessToken();
+      } catch (refreshError: unknown) {
+        if (
+          refreshError instanceof ApiError &&
+          refreshError.status === 401 &&
+          refreshError.codigo === "SESION_EXPIRADA"
+        ) {
+          setAccessToken(null);
+          onSessionExpiredCallback?.();
         }
-      } catch {
-        // Falló el refresh
+        throw refreshError;
       }
 
-      // Si el refresh falló pero era una petición de latido (heartbeat), no botamos al usuario
-      if (endpoint.includes("/api/auth/heartbeat")) {
-        throw new ApiError(response.status, errorData.codigo, errorData.mensaje, errorData);
-      }
-
-      // Si el refresh falló, limpiar sesión y disparar expiración
-      setAccessToken(null);
-      if (onSessionExpiredCallback) {
-        onSessionExpiredCallback();
-      }
+      // Retry the original request once, including heartbeat requests.
+      return await apiClient<T>(endpoint, {
+        ...options,
+        retryOnSessionExpired: false,
+      });
     }
 
     throw new ApiError(response.status, errorData.codigo, errorData.mensaje, errorData);
   }
 
-  return (responseType === "blob" ? response.blob() : response.json()) as Promise<T>;
+  return await (responseType === "blob" ? response.blob() : response.json()) as T;
+  } finally {
+    notificarActividad(-1);
+  }
 }

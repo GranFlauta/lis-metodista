@@ -28,8 +28,8 @@ def listar_estudios(
 ) -> list[EstudioCatalogo]:
     """
     Retorna la lista de estudios activos con su configuración.
-    Si seleccion_parcial es True, incluye los grupos con sus parámetros de la versión activa.
-    Para los demás, grupos es null.
+    Incluye los nombres de los campos de la versión activa y, para estudios con
+    selección parcial, también su agrupación.
     """
     estudios = (
         db.query(Estudio)
@@ -41,34 +41,32 @@ def listar_estudios(
     resultado: list[EstudioCatalogo] = []
     for estudio in estudios:
         grupos: list[GrupoEstudio] | None = None
-        if estudio.seleccion_parcial:
-            version_activa = (
-                db.query(EstudioVersion)
-                .filter(
-                    EstudioVersion.id_estudio == estudio.id_estudio,
-                    EstudioVersion.activa == True,
-                )
-                .first()
+        version_activa = (
+            db.query(EstudioVersion)
+            .filter(
+                EstudioVersion.id_estudio == estudio.id_estudio,
+                EstudioVersion.activa == True,
             )
-            if version_activa:
-                parametros = (
-                    db.query(Parametro)
-                    .filter(Parametro.id_estudio_version == version_activa.id_estudio_version)
-                    .order_by(Parametro.orden_visualizacion)
-                    .all()
-                )
-                grupos_dict: dict[str, list[ParametroResumen]] = {}
-                for p in parametros:
-                    if p.grupo:
-                        if p.grupo not in grupos_dict:
-                            grupos_dict[p.grupo] = []
-                        grupos_dict[p.grupo].append(
-                            ParametroResumen(codigo=p.codigo, nombre=p.nombre)
-                        )
-                grupos = [
-                    GrupoEstudio(codigo=grupo_codigo, parametros=params_list)
-                    for grupo_codigo, params_list in grupos_dict.items()
-                ]
+            .first()
+        )
+        parametros = (
+            db.query(Parametro)
+            .filter(Parametro.id_estudio_version == version_activa.id_estudio_version)
+            .order_by(Parametro.orden_visualizacion)
+            .all()
+        ) if version_activa else []
+        campos = [ParametroResumen(codigo=p.codigo, nombre=p.nombre) for p in parametros]
+        if estudio.seleccion_parcial:
+            grupos_dict: dict[str, list[ParametroResumen]] = {}
+            for parametro in parametros:
+                if parametro.grupo:
+                    grupos_dict.setdefault(parametro.grupo, []).append(
+                        ParametroResumen(codigo=parametro.codigo, nombre=parametro.nombre)
+                    )
+            grupos = [
+                GrupoEstudio(codigo=grupo_codigo, parametros=params_list)
+                for grupo_codigo, params_list in grupos_dict.items()
+            ]
 
         resultado.append(
             EstudioCatalogo(
@@ -77,6 +75,7 @@ def listar_estudios(
                 categoria=estudio.categoria,
                 seleccion_parcial=estudio.seleccion_parcial,
                 grupos=grupos,
+                parametros=campos,
             )
         )
 

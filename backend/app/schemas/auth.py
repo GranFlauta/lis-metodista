@@ -180,9 +180,12 @@ class UsuarioResponse(BaseModel):
 
 
 class ConfigSesionResumenResponse(BaseModel):
-    """Resumen de configuración de sesión devuelto en login y refresh (D35-02 / T5)."""
+    """Resumen de la política efectiva de sesión devuelto en login y refresh."""
     intervalo_latido_seg: int = Field(..., description="Intervalo recomendado entre latidos en segundos.")
-    inactividad_min: int = Field(..., description="Minutos permitidos de inactividad antes de expirar.")
+    inactividad_min: int | None = Field(
+        ...,
+        description="Minutos de inactividad permitidos; null cuando el límite está desactivado.",
+    )
 
 
 class TokenResponse(BaseModel):
@@ -209,44 +212,18 @@ class HeartbeatRequest(BaseModel):
 class HeartbeatResponse(BaseModel):
     """Respuesta para POST /api/auth/heartbeat."""
     intervalo_latido_seg: int = Field(..., description="Intervalo recomendado para el siguiente latido en segundos.")
-    segundos_restantes_inactividad: int = Field(..., description="Segundos restantes antes de expiración por inactividad.")
+    segundos_restantes_inactividad: int | None = Field(
+        ...,
+        description="Segundos restantes; null cuando el límite de inactividad está desactivado.",
+    )
 
 
 class SesionConfigResponse(BaseModel):
-    """Respuesta de configuración de sesión para el Administrador (GET y PUT)."""
-    model_config = ConfigDict(populate_by_name=True)
-
-    sesion_intervalo_latido_seg: int = Field(..., alias="intervalo_latido_seg")
-    sesion_muerta_tras_seg: int = Field(..., alias="muerta_tras_seg")
-    sesion_inactividad_min: int = Field(..., alias="inactividad_min")
-    sesion_tope_absoluto_horas: int = Field(..., alias="tope_absoluto_horas")
-
-
-class SesionConfigUpdateRequest(BaseModel):
-    """Cuerpo para actualización de tiempos de sesión por el Administrador (PUT)."""
-    model_config = ConfigDict(populate_by_name=True)
-
-    sesion_intervalo_latido_seg: int | None = Field(default=None, alias="intervalo_latido_seg")
-    sesion_muerta_tras_seg: int | None = Field(default=None, alias="muerta_tras_seg")
-    sesion_inactividad_min: int | None = Field(default=None, alias="inactividad_min")
-    sesion_tope_absoluto_horas: int | None = Field(default=None, alias="tope_absoluto_horas")
-
-    @model_validator(mode="before")
-    @classmethod
-    def resolver_alias_prefijo(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            mapeo = {
-                "intervalo_latido_seg": "sesion_intervalo_latido_seg",
-                "muerta_tras_seg": "sesion_muerta_tras_seg",
-                "inactividad_min": "sesion_inactividad_min",
-                "tope_absoluto_horas": "sesion_tope_absoluto_horas",
-            }
-            for corto, largo in mapeo.items():
-                if largo in data and corto not in data:
-                    data[corto] = data[largo]
-                elif corto in data and largo not in data:
-                    data[largo] = data[corto]
-        return data
+    """Política efectiva de sesión para consulta administrativa."""
+    modo_produccion: bool
+    intervalo_latido_seg: int
+    inactividad_min: int | None
+    tope_absoluto_horas: int
 
 
 # -----------------------------------------------------------------------------

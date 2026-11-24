@@ -1,7 +1,7 @@
 """
 Pruebas exhaustivas para Fase 4:
 - Publicación oficial de órdenes con folio secuencial inmutable AAAA-NNNNNN.
-- Validación de observaciones finales del informe obligatorias.
+- Publicación con observaciones opcionales y sólo campos utilizados.
 - Snapshot JSON canónico y hash criptográfico SHA-256.
 - Papelera lógica auditada con justificativo obligatorio.
 - Restauración de papelera a estado RECICLAJE (bloqueo de impresión).
@@ -19,10 +19,47 @@ from sqlalchemy.exc import DBAPIError
 from app.models.order import Orden
 from app.models.patient import Paciente
 from app.models.report import Informe, InformeEvento
+from app.models.result import LaboratorioConfig
 from tests.base import IntegrationTestCase
 
 
 class TestFase4PublicacionYPapelera(IntegrationTestCase):
+    def test_separador_decimal_se_congela_al_publicar(self) -> None:
+        import pypdfium2 as pdfium
+
+        config = self.db.query(LaboratorioConfig).filter_by(clave="separador_decimal").one()
+        original = config.valor
+        try:
+            config.valor = "."
+            self.db.commit()
+            id_orden = self.crear_y_completar_orden()
+            publicada = self.client.post(f"/api/ordenes/{id_orden}/publicar", headers=self.bio_headers)
+            self.assertEqual(publicada.status_code, 201, publicada.text)
+            folio = publicada.json()["folio"]
+            self.db.expire_all()
+            informe = self.db.query(Informe).filter_by(folio=folio).one()
+            self.assertEqual(informe.snapshot_json["separador_decimal"], ".")
+            config.valor = ","
+            self.db.commit()
+            respuesta = self.client.get(f"/api/informes/{folio}/pdf", headers=self.bio_headers)
+            self.assertEqual(respuesta.status_code, 200)
+            pdf = pdfium.PdfDocument(respuesta.content)
+            try:
+                pagina = pdf[0]
+                try:
+                    texto = pagina.get_textpage()
+                    try:
+                        self.assertIn("4.2", texto.get_text_range())
+                    finally:
+                        texto.close()
+                finally:
+                    pagina.close()
+            finally:
+                pdf.close()
+        finally:
+            config.valor = original
+            self.db.commit()
+
     def setUp(self) -> None:
         super().setUp()
         self.bio = self.crear_usuario_test(
@@ -129,19 +166,52 @@ class TestFase4PublicacionYPapelera(IntegrationTestCase):
         self.assertIsNotNone(evento_db)
         self.assertEqual(evento_db.id_usuario, self.bio.id_usuario)
 
-    def test_02_publicar_sin_observaciones_finales_falla(self) -> None:
-        """Publicar sin observaciones finales de informe es rechazado con 400 VALIDACION."""
+    def test_02_publicar_sin_observaciones_finales(self) -> None:
+        """Las observaciones opcionales no obligan a inventar texto para publicar."""
         id_orden = self.crear_y_completar_orden(observaciones_orden=None)
 
         pub_res = self.client.post(
             f"/api/ordenes/{id_orden}/publicar",
             headers=self.bio_headers,
         )
-        self.assertEqual(pub_res.status_code, 400)
-        self.assertIn("observaciones finales", pub_res.json()["mensaje"].lower())
+        self.assertEqual(pub_res.status_code, 201, pub_res.text)
+        detalle = self.client.get(f"/api/informes/{pub_res.json()['folio']}", headers=self.bio_headers).json()
+        self.assertIsNone(detalle["snapshot_json"]["orden"]["observaciones"])
 
-    def test_03_publicar_con_pendientes_falla(self) -> None:
-        """Publicar una orden incompleta con parámetros faltantes es rechazado con 400 VALIDACION."""
+    def test_borrador_de_catalogo_anterior_publica_un_solo_campo_sin_observaciones(self) -> None:
+        respuesta = self.client.post("/api/ordenes", headers=self.bio_headers, json={
+            "id_paciente": self.id_paciente, "edad_anios": 28,
+            "estudios": [{"codigo": "ELECTROLITOS"}, {"codigo": "EGO"}],
+        })
+        self.assertEqual(respuesta.status_code, 201, respuesta.text)
+        id_orden = respuesta.json()["orden"]["id"]
+        orden = self.db.query(Orden).filter_by(id_orden=id_orden).one()
+        configuraciones = [(oe.estudio_version, oe.estudio_version.configuracion_json) for oe in orden.estudios]
+        try:
+            for version, config in configuraciones:
+                anterior = dict(config or {})
+                anterior.pop("seleccion_campos", None)
+                version.configuracion_json = anterior
+            self.db.commit()
+            captura = self.client.get(f"/api/ordenes/{id_orden}/captura", headers=self.bio_headers).json()
+            self.assertFalse(captura["completitud"]["completo"])
+            self.assertTrue(all(p["valor"] is None for e in captura["estudios"] for s in e["secciones"] for p in s["parametros"]))
+            self.assertEqual(self.client.post(f"/api/ordenes/{id_orden}/publicar", headers=self.bio_headers).status_code, 400)
+            guardado = self.client.put(f"/api/ordenes/{id_orden}/resultados", headers=self.bio_headers, json={"valores": {"SODIO": "140.25"}})
+            self.assertTrue(guardado.json()["completitud"]["completo"], guardado.text)
+            publicada = self.client.post(f"/api/ordenes/{id_orden}/publicar", headers=self.bio_headers)
+            self.assertEqual(publicada.status_code, 201, publicada.text)
+            detalle = self.client.get(f"/api/informes/{publicada.json()['folio']}", headers=self.bio_headers).json()
+            codigos = [p["codigo"] for e in detalle["snapshot_json"]["estudios"] for s in e["secciones"] for p in s["parametros"]]
+            self.assertEqual(codigos, ["SODIO"])
+            self.assertTrue(detalle["snapshot_json"]["orden"]["creado_en"])
+        finally:
+            for version, config in configuraciones:
+                version.configuracion_json = config
+            self.db.commit()
+
+    def test_03_publicar_solo_campos_utilizados(self) -> None:
+        """Publicar con un resultado utilizado omite los restantes campos vacíos."""
         res_orden = self.client.post(
             "/api/ordenes",
             headers=self.bio_headers,
@@ -168,8 +238,10 @@ class TestFase4PublicacionYPapelera(IntegrationTestCase):
             f"/api/ordenes/{id_orden}/publicar",
             headers=self.bio_headers,
         )
-        self.assertEqual(pub_res.status_code, 400)
-        self.assertEqual(pub_res.json()["codigo"], "VALIDACION")
+        self.assertEqual(pub_res.status_code, 201, pub_res.text)
+        detalle = self.client.get(f"/api/informes/{pub_res.json()['folio']}", headers=self.bio_headers).json()
+        parametros = [p["codigo"] for e in detalle["estudios_informe"] for sec in e["secciones"] for p in sec["parametros"]]
+        self.assertEqual(parametros, ["SODIO"])
 
     def test_04_mover_a_papelera_y_consultar_papelera(self) -> None:
         """Solo el firmante puede enviar a papelera con justificativo; se lista en la papelera."""
@@ -301,6 +373,59 @@ class TestFase4PublicacionYPapelera(IntegrationTestCase):
         acciones = [ev["accion"] for ev in hist_res.json()]
         self.assertEqual(acciones, ["PUBLICACION", "EDICION_V2", "PAPELERA"])
 
+    def test_pdf_solo_para_informe_vigente_y_con_evento_de_emision(self) -> None:
+        id_orden = self.crear_y_completar_orden()
+        folio = self.client.post(f"/api/ordenes/{id_orden}/publicar", headers=self.bio_headers).json()["folio"]
+        ruta = f"/api/informes/{folio}/pdf"
+        respuesta = self.client.get(ruta, headers=self.bio_headers)
+        self.assertEqual(respuesta.status_code, 200, respuesta.text[:100] if respuesta.status_code != 200 else "")
+        self.assertTrue(respuesta.content.startswith(b"%PDF-"))
+        self.assertEqual(respuesta.headers["content-type"], "application/pdf")
+        eventos = self.client.get(f"/api/informes/{folio}/historial", headers=self.bio_headers).json()
+        self.assertIn("IMPRESION", [evento["accion"] for evento in eventos])
+        self.client.post(f"/api/informes/{folio}/papelera", headers=self.bio_headers, json={"justificativo": "Anulación de prueba ficticia"})
+        self.assertEqual(self.client.get(ruta, headers=self.bio_headers).status_code, 403)
+        self.client.post(f"/api/informes/{folio}/restaurar", headers=self.bio_headers, json={"justificativo": "Restauración de prueba ficticia"})
+        self.assertEqual(self.client.get(ruta, headers=self.bio_headers).status_code, 403)
+
+    def test_consulta_de_paginas_no_habilita_pdf_de_version_desplazada(self) -> None:
+        id_orden = self.crear_y_completar_orden()
+        folio = self.client.post(f"/api/ordenes/{id_orden}/publicar", headers=self.bio_headers).json()["folio"]
+        ruta = f"/api/informes/{folio}/vista-previa?version=1"
+        self.assertEqual(self.client.get(ruta).status_code, 401)
+        original = self.client.get(f"/api/informes/{folio}", headers=self.bio_headers).json()
+        respuesta = self.client.get(ruta, headers=self.bio_headers)
+        self.assertEqual(respuesta.status_code, 200, respuesta.text[:100] if respuesta.status_code != 200 else "")
+        self.assertEqual(respuesta.json()["formato"], "Carta")
+        self.assertTrue(respuesta.json()["paginas"][0]["imagen"].startswith("data:image/png;base64,"))
+        self.assertIn("no-store", respuesta.headers["cache-control"])
+        self.client.post(f"/api/informes/{folio}/versiones", headers=self.bio_headers, json={"justificativo": "Corrección de prueba ficticia"})
+        self.assertEqual(self.client.get(ruta, headers=self.bio_headers).status_code, 200)
+        self.assertEqual(self.client.get(f"/api/informes/{folio}/pdf?version=1", headers=self.bio_headers).status_code, 403)
+        detalle = self.client.get(f"/api/informes/{folio}?version=1", headers=self.bio_headers).json()
+        self.assertEqual(detalle["snapshot_sha256"], original["snapshot_sha256"])
+        self.assertEqual(detalle["snapshot_json"], original["snapshot_json"])
+        self.assertNotIn("IMPRESION", [e["accion"] for e in detalle["eventos"]])
+
+    def test_pdf_no_expone_hash_matricula_ni_version_impresa(self) -> None:
+        import pypdfium2 as pdfium
+
+        self.bio.matricula_profesional = "REGISTRO_FICTICIO_NO_IMPRIMIR"
+        self.db.commit()
+        id_orden = self.crear_y_completar_orden(observaciones_orden=None)
+        publicada = self.client.post(f"/api/ordenes/{id_orden}/publicar", headers=self.bio_headers).json()
+        respuesta = self.client.get(f"/api/informes/{publicada['folio']}/pdf", headers=self.bio_headers)
+        self.assertEqual(respuesta.status_code, 200)
+        with pdfium.PdfDocument(respuesta.content) as pdf:
+            pagina = pdf[0]
+            texto = pagina.get_textpage()
+            contenido = texto.get_text_range()
+            texto.close()
+            pagina.close()
+        self.assertIn("LIC. Test Usuario", contenido)
+        self.assertIn("Hora de entrega de resultado:", contenido)
+        for excluido in ("REGISTRO_FICTICIO_NO_IMPRIMIR", publicada["snapshot_sha256"], "SHA-256", "Versión V"):
+            self.assertNotIn(excluido, contenido)
     def test_08_inmutabilidad_trigger_bd(self) -> None:
         """Trigger de PostgreSQL protege informes de DELETE y modificaciones indebidas de contenido."""
         id_orden = self.crear_y_completar_orden()

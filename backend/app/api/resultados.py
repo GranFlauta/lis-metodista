@@ -24,12 +24,13 @@ from app.core.errors import (
 from app.models.order import Orden
 from app.models.result import LaboratorioConfig
 from app.models.user import Usuario
-from app.reports.pdf import generar_informe_pdf
+from app.reports.pdf import generar_vista_previa
 from app.schemas.resultado import (
     CalcularRequest,
     ConfiguracionLaboratorioResponse,
     ConfirmarDefectosRequest,
-    PreviewPDFRequest,
+    VistaPreviaRequest,
+    VistaPreviaResponse,
     ResultadosUpdateRequest,
 )
 from app.services.evaluacion_service import (
@@ -43,33 +44,30 @@ from app.services.evaluacion_service import (
 router = APIRouter(tags=["Resultados"])
 
 
-def _validar_control_factor_reumatoideo(valores: dict[str, Any]) -> None:
-    for codigo in ("ASTO_DILUCION", "FR_DILUCION"):
-        resultado_semi = valores.get(codigo)
-        if isinstance(resultado_semi, str) and ("Dilución inválida" in resultado_semi or "dilución pendiente" in resultado_semi):
-            raise ValidacionError("Indique un factor de dilución válido antes de guardar el resultado.")
-    resultado = valores.get("FR_DILUCION")
-    if isinstance(resultado, str) and "no conforme" in resultado.casefold():
-        raise ValidacionError("No se puede guardar Factor Reumatoideo: los controles positivo y negativo deben estar conformes.")
-
-
-@router.post("/api/ordenes/{id}/vista-previa.pdf", response_class=Response, summary="Generar PDF preliminar multipágina")
-def generar_pdf_preliminar(
+@router.post("/api/ordenes/{id}/vista-previa", response_model=VistaPreviaResponse, summary="Vista previa de pantalla en páginas Carta")
+def obtener_vista_previa(
     id: int,
-    payload: PreviewPDFRequest,
+    payload: VistaPreviaRequest,
+    request: Request,
+    response: Response,
     current_user: Usuario = Depends(require_auth),
     db: Session = Depends(get_db),
-) -> Response:
-    if current_user.rol and current_user.rol.nombre in ("ADMIN", "VISITANTE"):
-        raise ProhibidoError("Este usuario no puede generar informes preliminares.")
+) -> dict[str, Any]:
+    es_admin = bool(current_user.rol and current_user.rol.nombre == "ADMIN")
+    if not current_user.rol or current_user.rol.nombre not in ("ADMIN", "BIOQUIMICO"):
+        raise ProhibidoError("Este usuario no puede consultar la vista previa de borradores.")
     orden = db.query(Orden).filter(Orden.id_orden == id).first()
-    if not orden or orden.id_usuario_autor != current_user.id_usuario:
+    if not orden or (not es_admin and orden.id_usuario_autor != current_user.id_usuario):
         raise NoEncontradoError(f"Orden con id {id} no encontrada.")
+    if es_admin and (
+        payload.valores or payload.rangos_override or payload.unidades_override or payload.observaciones_estudios is not None
+        or payload.observaciones_orden is not None or payload.etiqueta_cayados is not None
+    ):
+        raise ProhibidoError("El administrador solo puede consultar los resultados guardados.")
     if orden.bloqueada or orden.estado_trabajo not in ("INCOMPLETO", "COMPLETO"):
         raise ConflictoError("La vista previa preliminar solo está disponible para órdenes en borrador.")
     if len(payload.valores) > 200:
         raise ValidacionError("Máximo 200 claves por petición.")
-    _validar_control_factor_reumatoideo(payload.valores)
 
     alcance = obtener_parametros_alcance_orden(orden)
     params = {param.codigo: param for items in alcance.values() for param in items}
@@ -85,6 +83,7 @@ def generar_pdf_preliminar(
         orden,
         valores_simulados=payload.valores,
         overrides_simulados=payload.rangos_override,
+        unidades_simuladas=payload.unidades_override,
     )
     for estudio in captura["estudios"]:
         if payload.observaciones_estudios and estudio["codigo"] in payload.observaciones_estudios:
@@ -99,7 +98,8 @@ def generar_pdf_preliminar(
     paciente = orden.paciente
     edad = f"{orden.edad_anios} años" if orden.edad_anios is not None else (f"{orden.edad_meses} meses" if orden.edad_meses else "")
     nombre_completo = " ".join(filter(None, [paciente.nombres, paciente.apellido_paterno, paciente.apellido_materno]))
-    firmante = current_user
+    firmante = orden.autor
+    config_decimal = db.query(LaboratorioConfig).filter(LaboratorioConfig.clave == "separador_decimal").first()
     documento = {
         "aprobado": False,
         "folio": None,
@@ -107,6 +107,7 @@ def generar_pdf_preliminar(
         "numero_version": None,
         "publicado_en": None,
         "snapshot_sha256": None,
+        "separador_decimal": config_decimal.valor if config_decimal else ",",
         "paciente": {
             "nombre_completo": nombre_completo,
             "ci": paciente.ci,
@@ -117,6 +118,7 @@ def generar_pdf_preliminar(
             "id_orden": orden.id_orden,
             "fecha_hora_toma_muestra": orden.fecha_hora_toma_muestra.isoformat() if orden.fecha_hora_toma_muestra else None,
             "fecha_solicitud": orden.fecha_solicitud.isoformat() if orden.fecha_solicitud else None,
+            "creado_en": orden.creado_en.isoformat() if orden.creado_en else None,
             "medico_solicitante": orden.medico_solicitante,
             "pieza": orden.pieza,
             "observaciones": payload.observaciones_orden if payload.observaciones_orden is not None else orden.observaciones,
@@ -127,12 +129,17 @@ def generar_pdf_preliminar(
         },
         "estudios": captura["estudios"],
     }
-    pdf = generar_informe_pdf(documento)
-    return Response(
-        content=pdf,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="orden-{id}-preliminar.pdf"', "Cache-Control": "private, no-store, max-age=0"},
-    )
+    paginas = generar_vista_previa(documento)
+    if es_admin and orden.id_usuario_autor != current_user.id_usuario:
+        registrar_evento_seguridad(
+            db=db, accion="ADMIN_VE_PRIVADO", id_usuario=current_user.id_usuario,
+            id_objetivo=orden.id_usuario_autor, ip=obtener_ip_cliente(request),
+            detalle={"recurso": "vista_previa", "id_orden": orden.id_orden},
+        )
+        db.commit()
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return paginas
 
 
 @router.get(
@@ -196,7 +203,6 @@ def calcular_vista_previa(
     if len(payload.valores) > 200:
         raise ValidacionError("Máximo 200 claves por petición.")
 
-    _validar_control_factor_reumatoideo(payload.valores)
 
     alcance_por_oe = obtener_parametros_alcance_orden(orden)
     params_map = {}
@@ -216,6 +222,7 @@ def calcular_vista_previa(
         orden,
         valores_simulados=payload.valores,
         overrides_simulados=payload.rangos_override,
+        unidades_simuladas=payload.unidades_override,
     )
 
 
@@ -246,7 +253,6 @@ def actualizar_resultados(
     if orden.bloqueada or orden.estado_trabajo not in ("INCOMPLETO", "COMPLETO"):
         raise ConflictoError("La orden se encuentra bloqueada o publicada y no permite modificaciones.")
 
-    _validar_control_factor_reumatoideo(payload.valores)
 
     return guardar_resultados_orden(
         db,
@@ -257,6 +263,7 @@ def actualizar_resultados(
         observaciones_estudios=payload.observaciones_estudios,
         observaciones_orden=payload.observaciones_orden,
         etiquetas_estudios=payload.etiquetas_estudios,
+        unidades_override=payload.unidades_override,
     )
 
 

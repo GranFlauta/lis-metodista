@@ -4,7 +4,7 @@ Ejecutadas con unittest contra PostgreSQL real.
 """
 from __future__ import annotations
 
-from app.catalog.definitions import PERFILES
+from app.catalog.definitions import ESTUDIOS, PERFILES
 from app.models.catalog import Estudio
 from tests.base import IntegrationTestCase
 
@@ -40,14 +40,14 @@ class TestCatalogoAPI(IntegrationTestCase):
 
     def test_09_estudios_activos_y_seleccion_parcial(self) -> None:
         """
-        9. Devuelve exactamente los 9 estudios activos; solo Inmunoserología tiene
+        9. Devuelve exactamente los 13 estudios activos; solo Inmunoserología tiene
         seleccion_parcial y grupos (incluye VIH y PCR_SEMICUANT); los demás grupos = null.
         """
         resp = self.client.get("/api/catalogo/estudios", headers=self.bio_headers)
         self.assertEqual(resp.status_code, 200)
 
         estudios = resp.json()
-        self.assertEqual(len(estudios), 9, f"Se esperaban 9 estudios activos, llegaron {len(estudios)}")
+        self.assertEqual(len(estudios), 13, f"Se esperaban 13 estudios activos, llegaron {len(estudios)}")
 
         estudios_por_codigo = {e["codigo"]: e for e in estudios}
         self.assertIn("INMUNOSEROLOGIA", estudios_por_codigo)
@@ -58,6 +58,8 @@ class TestCatalogoAPI(IntegrationTestCase):
             self.assertIn("categoria", e)
             self.assertIn("seleccion_parcial", e)
             self.assertIn("grupos", e)
+            self.assertIn("parametros", e)
+            self.assertIsInstance(e["parametros"], list)
 
             if codigo == "INMUNOSEROLOGIA":
                 self.assertTrue(e["seleccion_parcial"])
@@ -80,6 +82,10 @@ class TestCatalogoAPI(IntegrationTestCase):
             else:
                 self.assertFalse(e["seleccion_parcial"], f"Estudio {codigo} no debe tener seleccion_parcial")
                 self.assertIsNone(e["grupos"], f"Estudio {codigo} debe tener grupos = null")
+
+        curva = estudios_por_codigo["CURVA_TOLERANCIA"]
+        self.assertEqual(curva["nombre"], "Curva de tolerancia")
+        self.assertEqual(len(curva["parametros"]), 15)
 
     def test_10_perfiles_coinciden_con_definiciones(self) -> None:
         """
@@ -170,7 +176,7 @@ class TestCatalogoAPI(IntegrationTestCase):
             resp = self.client.get("/api/catalogo/estudios", headers=self.bio_headers)
             self.assertEqual(resp.status_code, 200)
             codigos_visibles = [e["codigo"] for e in resp.json()]
-            self.assertEqual(len(codigos_visibles), 8)
+            self.assertEqual(len(codigos_visibles), len(ESTUDIOS) - 1)
             self.assertNotIn("QUIMICA_SANGUINEA", codigos_visibles)
         finally:
             estudio_target.activo = True
@@ -180,5 +186,5 @@ class TestCatalogoAPI(IntegrationTestCase):
         resp_restaurado = self.client.get("/api/catalogo/estudios", headers=self.bio_headers)
         self.assertEqual(resp_restaurado.status_code, 200)
         codigos_restaurados = [e["codigo"] for e in resp_restaurado.json()]
-        self.assertEqual(len(codigos_restaurados), 9)
+        self.assertEqual(len(codigos_restaurados), len(ESTUDIOS))
         self.assertIn("QUIMICA_SANGUINEA", codigos_restaurados)

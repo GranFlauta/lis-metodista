@@ -20,7 +20,7 @@ export interface UsuarioAutenticado extends UsuarioResumen {
 
 export interface ConfigSesionResumen {
   intervalo_latido_seg: number;
-  inactividad_min: number;
+  inactividad_min: number | null;
 }
 
 export interface TokenResponse {
@@ -45,14 +45,14 @@ export interface CambiarPasswordPayload {
 
 export interface HeartbeatResponse {
   intervalo_latido_seg: number;
-  segundos_restantes_inactividad: number;
+  segundos_restantes_inactividad: number | null;
 }
 
 export interface SesionConfig {
-  sesion_intervalo_latido_seg: number;
-  sesion_muerta_tras_seg: number;
-  sesion_inactividad_min: number;
-  sesion_tope_absoluto_horas: number;
+  modo_produccion: boolean;
+  intervalo_latido_seg: number;
+  inactividad_min: number | null;
+  tope_absoluto_horas: number;
 }
 
 export async function loginApi(payload: LoginPayload): Promise<TokenResponse> {
@@ -78,20 +78,12 @@ export async function heartbeatApi(actividad: boolean = false): Promise<Heartbea
   return apiClient<HeartbeatResponse>("/api/auth/heartbeat", {
     method: "POST",
     body: JSON.stringify({ actividad }),
-    retryOnSessionExpired: false,
   });
 }
 
 export async function getSesionConfigApi(): Promise<SesionConfig> {
   return apiClient<SesionConfig>("/api/admin/configuracion/sesion", {
     method: "GET",
-  });
-}
-
-export async function updateSesionConfigApi(payload: SesionConfig): Promise<SesionConfig> {
-  return apiClient<SesionConfig>("/api/admin/configuracion/sesion", {
-    method: "PUT",
-    body: JSON.stringify(payload),
   });
 }
 

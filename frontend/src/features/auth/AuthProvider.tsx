@@ -44,7 +44,7 @@ interface AuthContextType {
 
 const CONFIG_SESION_DEFECTO: ConfigSesionResumen = {
   intervalo_latido_seg: 30,
-  inactividad_min: 1440, // 24 horas
+  inactividad_min: null,
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -58,7 +58,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [segundosRestantesInactividad, setSegundosRestantesInactividad] = useState<number | null>(null);
 
   const heartbeatIntervalRef = useRef<number | null>(null);
-  const actividadDetectadaRef = useRef<boolean>(false);
+  const heartbeatInFlightRef = useRef<boolean>(false);
+  const actividadPendienteRef = useRef<boolean>(false);
   const ultimoMouseMoveRef = useRef<number>(0);
 
   const detenerLatido = useCallback(() => {
@@ -73,32 +74,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAccessToken(null);
     setUsuario(null);
     setSegundosRestantesInactividad(null);
-    actividadDetectadaRef.current = false;
+    actividadPendienteRef.current = false;
     if (mensajeExpiracion) {
       setErrorSesion(mensajeExpiracion);
     }
   }, [detenerLatido]);
 
-  // Enviar un latido con o sin forzar actividad
+  // Serialize heartbeats so an activity signal is not lost behind an automatic ping.
   const ejecutarLatido = useCallback(async (forzarActividad: boolean = false) => {
-    try {
-      const huboActividad = forzarActividad || actividadDetectadaRef.current;
-      actividadDetectadaRef.current = false;
+    actividadPendienteRef.current = actividadPendienteRef.current || forzarActividad;
+    if (heartbeatInFlightRef.current) return;
 
-      const resp = await heartbeatApi(huboActividad);
-      if (resp) {
-        setSegundosRestantesInactividad(Math.max(86400, resp.segundos_restantes_inactividad || 86400));
+    heartbeatInFlightRef.current = true;
+    try {
+      do {
+        const huboActividad = actividadPendienteRef.current;
+        actividadPendienteRef.current = false;
+        const resp = await heartbeatApi(huboActividad);
+        setErrorSesion(null);
+        setSegundosRestantesInactividad(resp.segundos_restantes_inactividad);
         if (resp.intervalo_latido_seg && resp.intervalo_latido_seg !== configSesion.intervalo_latido_seg) {
           setConfigSesion((prev) => ({
             ...prev,
             intervalo_latido_seg: resp.intervalo_latido_seg,
           }));
         }
-      }
+      } while (actividadPendienteRef.current);
     } catch (err: unknown) {
       if (err instanceof ApiError && err.codigo === "SESION_EXPIRADA") {
         cerrarSesionLocal("Tu sesión expiró por inactividad o cierre de la aplicación.");
+      } else {
+        setErrorSesion("No se pudo verificar la sesión. Comprueba la conexión e inténtalo de nuevo.");
       }
+    } finally {
+      heartbeatInFlightRef.current = false;
     }
   }, [configSesion.intervalo_latido_seg, cerrarSesionLocal]);
 
@@ -116,23 +125,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await ejecutarLatido(true);
   }, [ejecutarLatido]);
 
-  // 1. Detección de actividad física del usuario (resetea el contador a 24 horas de inactividad)
+  // 1. Reportar actividad humana al backend, con un mínimo entre señales.
   useEffect(() => {
-    const restablecerTiempoInactividad = () => {
-      setSegundosRestantesInactividad(86400); // 24 horas
-    };
+    if (!usuario) return;
 
     const registrarActividad = () => {
-      actividadDetectadaRef.current = true;
-      restablecerTiempoInactividad();
+      const ahoraMs = Date.now();
+      if (ahoraMs - ultimoMouseMoveRef.current >= 1000) {
+        ultimoMouseMoveRef.current = ahoraMs;
+        void ejecutarLatido(true);
+      }
     };
 
     const registrarMouseMove = () => {
       const ahoraMs = Date.now();
-      if (ahoraMs - ultimoMouseMoveRef.current >= 2000) {
-        actividadDetectadaRef.current = true;
+      if (ahoraMs - ultimoMouseMoveRef.current >= 1000) {
         ultimoMouseMoveRef.current = ahoraMs;
-        restablecerTiempoInactividad();
+        void ejecutarLatido(true);
       }
     };
 
@@ -149,7 +158,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       window.removeEventListener("touchstart", registrarActividad);
       window.removeEventListener("mousemove", registrarMouseMove);
     };
-  }, []);
+  }, [usuario, ejecutarLatido]);
 
   // 2. Al volver la pestaña a primer plano (visibilitychange), latido inmediato (T5 punto 6)
   useEffect(() => {
@@ -183,25 +192,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [usuario, configSesion.intervalo_latido_seg, iniciarLatido, ejecutarLatido, detenerLatido]);
 
-  // 4. Cuenta regresiva por segundo del tiempo de inactividad
+  // 4. Cuenta regresiva basada en el tiempo restante informado por el backend.
   useEffect(() => {
-    if (segundosRestantesInactividad === null || segundosRestantesInactividad <= 0) return;
-
-    const timer = window.setInterval(() => {
-      setSegundosRestantesInactividad((prev) => {
-        if (prev === null) return null;
-        if (prev <= 1) {
-          cerrarSesionLocal("Tu sesión expiró por inactividad prolongada (24 horas).");
-          return 0;
-        }
-        return prev - 1;
-      });
+    if (!usuario || segundosRestantesInactividad === null || segundosRestantesInactividad <= 0) return;
+    const timer = window.setTimeout(() => {
+      setSegundosRestantesInactividad((actual) =>
+        actual === null ? null : Math.max(0, actual - 1)
+      );
     }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [usuario, segundosRestantesInactividad]);
 
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [segundosRestantesInactividad, cerrarSesionLocal]);
+  useEffect(() => {
+    if (usuario && segundosRestantesInactividad === 0) {
+      void ejecutarLatido(false);
+    }
+  }, [usuario, segundosRestantesInactividad, ejecutarLatido]);
 
   // 5. Inicialización de sesión con /api/auth/refresh
   useEffect(() => {
@@ -328,8 +334,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             left: 0,
             right: 0,
             zIndex: 9999,
-            backgroundColor: "#FEF3C7",
-            color: "#92400E",
+            backgroundColor: "var(--warning-bg)",
+            color: "var(--warning)",
             borderBottom: "1px solid #F59E0B",
             padding: "8px 16px",
             display: "flex",
@@ -348,7 +354,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             onClick={seguirConectado}
             className="lis-btn lis-btn-sm"
             style={{
-              backgroundColor: "#B45309",
+              backgroundColor: "var(--action-bg)",
               color: "#FFFFFF",
               border: "none",
               padding: "4px 12px",

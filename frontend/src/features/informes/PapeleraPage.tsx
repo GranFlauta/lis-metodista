@@ -4,6 +4,8 @@
  * Permite restaurar a estado 'RECICLAJE' con justificación obligatoria.
  */
 import React, { useEffect, useState } from "react";
+import { Icono } from "../../components/Icono";
+import { CargaLaboratorio } from "../../components/MarcaLaboratorio";
 import { Link } from "react-router-dom";
 import { getPapelera, restaurarDePapelera, PapeleraItem } from "../../api/informes";
 
@@ -116,11 +118,9 @@ export const PapeleraPage: React.FC = () => {
       )}
 
       {/* Tabla de Papelera */}
-      <div className="lis-card" style={{ padding: 0, overflow: "hidden" }}>
+      <div className="lis-card lis-table-responsive" style={{ padding: 0 }}>
         {cargando ? (
-          <div style={{ padding: "40px", textAlign: "center", color: "var(--text-muted)" }}>
-            Cargando papelera…
-          </div>
+          <CargaLaboratorio mensaje="Cargando papelera…" />
         ) : items.length === 0 ? (
           <div style={{ padding: "40px", textAlign: "center", color: "var(--text-muted)" }}>
             No hay informes en papelera ni en reciclaje actualmente.
@@ -137,7 +137,7 @@ export const PapeleraPage: React.FC = () => {
                 <th>Firmante Original</th>
                 <th>Motivo Auditado (Justificación)</th>
                 <th>Estado</th>
-                <th style={{ textAlign: "right" }}>Acciones</th>
+                <th style={{ textAlign: "center" }}>Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -163,37 +163,37 @@ export const PapeleraPage: React.FC = () => {
                     })}
                   </td>
                   <td style={{ fontSize: "12.5px" }}>{it.firmante_nombre}</td>
-                  <td style={{ maxWidth: "260px", fontSize: "12.5px", color: "#334155" }}>
+                  <td style={{ maxWidth: "260px", fontSize: "12.5px", color: "var(--text-main)" }}>
                     <div style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={it.motivo_papelera || ""}>
                       {it.motivo_papelera || "Sin justificación registrada"}
                     </div>
                   </td>
                   <td>
                     {it.estado === "PAPELERA" ? (
-                      <span className="lis-badge" style={{ backgroundColor: "#fee2e2", color: "#991b1b" }}>
+                      <span className="lis-badge" style={{ backgroundColor: "var(--error-bg)", color: "var(--error)" }}>
                         Papelera
                       </span>
                     ) : (
-                      <span className="lis-badge" style={{ backgroundColor: "#fef3c7", color: "#92400e" }}>
+                      <span className="lis-badge" style={{ backgroundColor: "var(--warning-bg)", color: "var(--warning)" }}>
                         Reciclaje
                       </span>
                     )}
                   </td>
-                  <td style={{ textAlign: "right" }}>
+                  <td style={{ textAlign: "center" }}>
                     <div style={{ display: "inline-flex", gap: "6px" }}>
                       <Link
                         to={`/informes/${it.folio}`}
                         className="lis-btn lis-btn-sm lis-btn-outline"
                         title="Ver detalle del informe"
                       >
-                        👁️ Ver
+                        <Icono nombre="ojo" size={14} /> Ver
                       </Link>
 
                       {it.estado === "PAPELERA" && (
                         <button
                           type="button"
                           className="lis-btn lis-btn-sm lis-btn-outline"
-                          style={{ color: "var(--success)", borderColor: "#86efac" }}
+                          style={{ color: "var(--success)", borderColor: "var(--success)" }}
                           onClick={() => handleAbrirRestaurar(it)}
                           title="Restaurar a estado Reciclaje con justificativo"
                         >

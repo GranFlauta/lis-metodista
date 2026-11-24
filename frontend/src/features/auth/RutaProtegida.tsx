@@ -6,6 +6,7 @@
 import React from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "./AuthProvider";
+import { CargaLaboratorio } from "../../components/MarcaLaboratorio";
 
 interface RutaProtegidaProps {
   children: React.ReactNode;
@@ -17,12 +18,7 @@ export const RutaProtegida: React.FC<RutaProtegidaProps> = ({ children, rolReque
   const location = useLocation();
 
   if (cargando) {
-    return (
-      <div className="lis-loading-screen">
-        <div className="lis-spinner" />
-        <p>Cargando sesión clínica...</p>
-      </div>
-    );
+    return <CargaLaboratorio pantalla mensaje="Cargando sesión clínica…" />;
   }
 
   // 1. Sin autenticación -> ir a login

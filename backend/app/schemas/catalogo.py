@@ -30,6 +30,7 @@ class EstudioCatalogo(BaseModel):
     categoria: str
     seleccion_parcial: bool
     grupos: Optional[list[GrupoEstudio]] = None
+    parametros: list[ParametroResumen] = Field(default_factory=list)
 
 
 class PerfilEstudioItem(BaseModel):

@@ -13,7 +13,6 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
 from app.core.clock import ahora
-from app.core.config import es_modo_demo, settings
 from app.core.database import get_db
 from app.core.errors import (
     DebeCambiarPasswordError,
@@ -23,7 +22,7 @@ from app.core.errors import (
 from app.core.security import decode_access_token, TokenExpiredError, TokenInvalidError
 from app.models.session import LogSeguridad, Sesion
 from app.models.user import Usuario
-from app.services.sesion_config_service import obtener_config_sesion
+from app.services.session_policy import validar_sesion_vigente
 
 # Rutas exentas de bloqueo cuando debe_cambiar_password = TRUE (§6.1)
 WHITELIST_CAMBIO_PASSWORD = (
@@ -92,7 +91,7 @@ def require_auth(
     1. Decodificar el Bearer; error -> 401 SESION_EXPIRADA.
     2. Cargar sesión por sid; verificar regla de sesión viva; si no vive -> 401 SESION_EXPIRADA.
     3. Cargar usuario; si activo = FALSE -> 401 SESION_EXPIRADA.
-    4. Si la ruta NO es heartbeat -> ultima_actividad = ahora.
+    4. La actividad humana se registra únicamente mediante heartbeat autenticado.
     5. Si debe_cambiar_password y la ruta no está en whitelist -> 403 DEBE_CAMBIAR_PASSWORD.
     """
     auth_header = request.headers.get("authorization")
@@ -119,49 +118,17 @@ def require_auth(
     now = ahora()
     ip_cliente = obtener_ip_cliente(request)
 
-    # 2. Cargar la sesión por sid
-    sesion = db.query(Sesion).filter(Sesion.id_sesion == session_id_str).first()
+    # Serialize protected requests with refresh and logout for this session.
+    sesion = (
+        db.query(Sesion)
+        .filter(Sesion.id_sesion == session_id_str)
+        .with_for_update()
+        .first()
+    )
     if not sesion:
         raise SesionExpiradaError("Sesión no encontrada.")
 
-    # Comprobar regla de sesión viva (§5, T5)
-    # revocada_en IS NULL y ahora < expira_en y ahora - ultimo_latido <= sesion_muerta_tras_seg y ahora - ultima_actividad <= sesion_inactividad_min
-    config_sesion = obtener_config_sesion(db)
-    esta_viva = True
-    motivo_muerte: str | None = None
-
-    if sesion.revocada_en is not None:
-        esta_viva = False
-        motivo_muerte = "Sesión revocada previamente."
-    elif not es_modo_demo() and sesion.expira_en and (sesion.expira_en.replace(tzinfo=now.tzinfo) if sesion.expira_en.tzinfo is None else sesion.expira_en) <= now:
-        esta_viva = False
-        motivo_muerte = "Tope absoluto de sesión alcanzado."
-    elif not es_modo_demo():
-        # Validar latido (sesion_muerta_tras_seg)
-        ultimo_latido_tz = sesion.ultimo_latido.replace(tzinfo=now.tzinfo) if sesion.ultimo_latido.tzinfo is None else sesion.ultimo_latido
-        if (now - ultimo_latido_tz).total_seconds() > config_sesion.muerta_tras_seg:
-            esta_viva = False
-            motivo_muerte = f"Sin latido por más de {config_sesion.muerta_tras_seg} segundos."
-        else:
-            # Validar inactividad (sesion_inactividad_min)
-            ultima_act_tz = sesion.ultima_actividad.replace(tzinfo=now.tzinfo) if sesion.ultima_actividad.tzinfo is None else sesion.ultima_actividad
-            if (now - ultima_act_tz).total_seconds() > (config_sesion.inactividad_min * 60):
-                esta_viva = False
-                motivo_muerte = f"Inactividad mayor a {config_sesion.inactividad_min} minutos."
-
-    if not esta_viva:
-        if sesion.revocada_en is None:
-            sesion.revocada_en = now
-            registrar_evento_seguridad(
-                db=db,
-                accion="SESION_EXPIRADA",
-                id_usuario=sesion.id_usuario,
-                id_objetivo=sesion.id_usuario,
-                ip=ip_cliente,
-                detalle={"motivo": motivo_muerte},
-            )
-            db.commit()
-        raise SesionExpiradaError("La sesión ha expirado o ha sido revocada.")
+    validar_sesion_vigente(db, sesion, ip_cliente, now)
 
     # 3. Cargar el usuario
     usuario = db.query(Usuario).filter(Usuario.id_usuario == user_id).first()
@@ -171,12 +138,8 @@ def require_auth(
             db.commit()
         raise SesionExpiradaError("Usuario inactivo o no encontrado.")
 
-    # 4. Si la ruta NO es heartbeat, renovar ultima_actividad y ultimo_latido
+    # Browser activity signals are recorded only by the heartbeat endpoint.
     path = request.url.path
-    if not path.endswith("/heartbeat"):
-        sesion.ultima_actividad = now
-        sesion.ultimo_latido = now
-        db.commit()
 
     # 5. Si debe_cambiar_password y la ruta no está en la lista blanca -> 403 DEBE_CAMBIAR_PASSWORD
     if usuario.debe_cambiar_password:

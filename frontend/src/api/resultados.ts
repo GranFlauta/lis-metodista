@@ -41,8 +41,13 @@ export interface RangoOverrideItem {
 export interface ParametroCaptura {
   codigo: string;
   nombre: string;
-  tipo_campo: "NUMERICO" | "SELECCION" | "TEXTO" | "RECUENTO" | "FECHA" | "CALCULADO";
+  tipo_campo: "NUMERICO" | "SELECCION" | "TEXTO" | "TEXTO_LIBRE" | "RECUENTO" | "FECHA" | "CALCULADO";
+  texto_sin_limite?: boolean;
+  captura_muestras?: { muestras_iniciales: number; sugerencia: string } | null;
+  muestras_seriadas?: { muestras: MuestraSeriada[]; resultado_anterior: string | null; pendientes: number[] } | null;
   unidad: string | null;
+  unidad_editable?: boolean;
+  unidad_modificada?: boolean;
   decimales: number | null;
   opciones: string[] | null;
   obligatorio: boolean;
@@ -50,25 +55,92 @@ export interface ParametroCaptura {
   metodo: string | null;
   muestra: string | null;
   valor: string | null;
+  valor_informe?: string;
   es_calculado: boolean;
   calculable: boolean;
   motivo_no_calculable: string | null;
+  codigo_motivo_no_calculable?: string | null;
   confirmado: boolean;
   es_defecto: boolean;
   valor_defecto: string | null;
   referencia: RangoReferenciaInfo | null;
   bandera: "BAJO" | "NORMAL" | "ALTO" | null;
+  captura_serologia?: ConfigCapturaSerologia | null;
+  serologia?: PresentacionSerologia | null;
+}
+
+export interface EntradaSerologia {
+  reactividad: "" | "Negativo" | "Positivo";
+  dilucion: string;
+  reactivo: string;
+  sensibilidad: string;
+  unidad: string;
+}
+
+export interface ConfigCapturaSerologia {
+  modo: "CALCULO" | "TITULO";
+  diluciones: string[];
+  reactivos?: { nombre: string; sensibilidad: string; unidad: string }[];
+  personalizable?: boolean;
+  unidades?: string[];
+  sin_dilucion?: boolean;
+}
+
+export interface PresentacionSerologia {
+  entrada: EntradaSerologia;
+  resultado: string | null;
+  unidad: string;
+  referencia: string;
+  completo: boolean;
+  motivo: string | null;
 }
 
 export interface SeccionCaptura {
   grupo: string | null;
+  formato?: "LISTA_TEXTO" | "MUESTRAS_SERIADAS" | "SELECCION_SIMPLE" | null;
   parametros: ParametroCaptura[];
+  columnas?: { unidad: boolean; referencia: boolean; bandera: boolean; muestra?: boolean; metodo?: boolean } | null;
+}
+
+export interface MuestraSeriada {
+  numero: number;
+  fecha: string | null;
+  hora?: string | null;
+  turno?: string | null;
+  resultado: string | null;
 }
 
 export interface ValidacionEstudio {
   severidad: "ERROR" | "ADVERTENCIA";
   mensaje: string;
   parametros: string[];
+}
+
+export interface CurvaToleranciaFila {
+  id: string;
+  etiqueta: string;
+  hora: string;
+  glucosa: string;
+  fecha: string;
+}
+
+export interface CurvaToleranciaCaptura {
+  configuracion: {
+    titulo: string;
+    unidad: string;
+    filas: CurvaToleranciaFila[];
+  };
+  fecha_estudio: string | null;
+  filas: Array<CurvaToleranciaFila & {
+    hora_valor: string | null;
+    glucosa_valor: string | null;
+    fecha_valor: string | null;
+    fecha_explicita: boolean;
+    instante: string | null;
+    minutos_desde_basal: string | null;
+    utilizada: boolean;
+    error: string | null;
+  }>;
 }
 
 export interface EstudioCaptura {
@@ -81,6 +153,8 @@ export interface EstudioCaptura {
   grupos_seleccionados: string[] | null;
   secciones: SeccionCaptura[];
   validaciones: ValidacionEstudio[];
+  sumas?: { parametros: string[]; valor: string | null; esperado: string; tolerancia: string; valida: boolean }[];
+  curva_tolerancia?: CurvaToleranciaCaptura | null;
 }
 
 export interface CompletitudCaptura {
@@ -116,29 +190,46 @@ export async function getCapturaOrdenApi(id: number): Promise<CapturaOrdenRespon
 export async function calcularResultadosApi(
   id: number,
   valores: Record<string, string | null>,
-  rangos_override?: Record<string, RangoOverrideItem>
+  rangos_override?: Record<string, RangoOverrideItem>,
+  unidades_override?: Record<string, string | null>
 ): Promise<CapturaOrdenResponse> {
   return apiClient<CapturaOrdenResponse>(`/api/ordenes/${id}/calcular`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ valores, rangos_override }),
+    body: JSON.stringify({ valores, rangos_override, unidades_override }),
   });
 }
 
-export async function generarVistaPreviaPdfApi(
+export interface PaginaVistaPrevia {
+  numero: number;
+  ancho: number;
+  alto: number;
+  imagen: string;
+}
+
+export interface VistaPreviaInforme {
+  formato: "Carta";
+  paginas: PaginaVistaPrevia[];
+}
+
+export interface VistaPreviaPayload {
+  valores: Record<string, string | null>;
+  rangos_override?: Record<string, RangoOverrideItem>;
+  observaciones_estudios?: Record<string, string | null>;
+  observaciones_orden?: string | null;
+  etiqueta_cayados?: string;
+  unidades_override?: Record<string, string | null>;
+}
+
+export async function generarVistaPreviaApi(
   idOrden: number,
-  payload: {
-    valores: Record<string, string>;
-    rangos_override?: Record<string, RangoOverrideItem>;
-    observaciones_estudios?: Record<string, string | null>;
-    observaciones_orden?: string | null;
-    etiqueta_cayados?: string;
-  },
-): Promise<Blob> {
-  return apiClient<Blob>(`/api/ordenes/${idOrden}/vista-previa.pdf`, {
+  payload: VistaPreviaPayload,
+  signal?: AbortSignal,
+): Promise<VistaPreviaInforme> {
+  return apiClient<VistaPreviaInforme>(`/api/ordenes/${idOrden}/vista-previa`, {
     method: "POST",
     body: JSON.stringify(payload),
-    responseType: "blob",
+    signal,
   });
 }
 
@@ -152,7 +243,8 @@ export async function guardarResultadosApi(
   rangos_override?: Record<string, RangoOverrideItem>,
   observaciones_estudios?: Record<string, string | null>,
   observaciones_orden?: string | null,
-  etiquetas_estudios?: Record<string, string | null>
+  etiquetas_estudios?: Record<string, string | null>,
+  unidades_override?: Record<string, string | null>
 ): Promise<CapturaOrdenResponse> {
   return apiClient<CapturaOrdenResponse>(`/api/ordenes/${id}/resultados`, {
     method: "PUT",
@@ -163,6 +255,7 @@ export async function guardarResultadosApi(
       observaciones_estudios,
       observaciones_orden,
       etiquetas_estudios,
+      unidades_override,
     }),
   });
 }

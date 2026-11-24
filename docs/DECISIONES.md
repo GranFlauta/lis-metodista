@@ -7,7 +7,7 @@
 
 | # | Decisión | Motivo |
 |---|---|---|
-| D-01 | **9 estudios** en v1: Hemograma, Coagulograma (+ grupo sanguíneo), Química, Electrolitos, Perfil Lipídico, Hepatograma, Proteinograma, EGO, Inmunoserología | Cubren el 100 % de los 2 perfiles |
+| D-01 | Catálogo vigente con 13 estudios: Hemograma, Coagulograma (+ grupo sanguíneo), Química, Electrolitos, Perfil Lipídico, Hepatograma, Proteinograma, EGO, Inmunoserología, Perfil Cardíaco, Perfil Pancreático, Parasitología y Curva de tolerancia | Catálogo ampliado por solicitud del laboratorio |
 | D-02 | **Hemograma manual** del Excel (GR y Hb estimados desde Hto). La imagen de referencia solo guía el estilo del PDF | El Excel es la regla operativa |
 | D-03 | El informe impreso lleva **siempre al autor original (A)** como responsable, aunque B lo haya calculado/publicado. B queda en la trazabilidad colaborativa | Responsabilidad legal |
 | D-04 | **On-premise** con Docker Compose: PostgreSQL + FastAPI + Caddy (HTTPS interno) + respaldo diario | Velocidad, datos médicos en el local, sin depender de internet |
@@ -16,7 +16,9 @@ Stack: **FastAPI + SQLAlchemy 2 + Alembic + PostgreSQL 16** · **React + Vite + 
 
 ## 2. Qué quedó fuera del v1 (la arquitectura ya lo soporta)
 
-Toxicológico, Coproparasitológico, Curva de tolerancia a la glucosa, Perfil cardíaco (CK-MB/CPK/LDH), Amilasa, Lipasa, hemograma de analizador (28 parámetros, otra `estudio_version`), informes parciales, rangos pediátricos, valores críticos, estadísticas, integración con equipos.
+Toxicológico, LDH, hemograma de analizador (28 parámetros, otra `estudio_version`), rangos pediátricos, valores críticos e integración con equipos. Las estadísticas operativas se incorporan por solicitud posterior (§19). La Curva de tolerancia fue incorporada al catálogo como estudio independiente.
+
+La Curva de tolerancia conserva únicamente las cinco mediciones capturadas. Cada punto requiere hora y glucosa válidas; los vacíos interrumpen la línea, y las horas anteriores requieren aclaración explícita de fecha. No se estiman valores ni se agregan umbrales o diagnósticos.
 Agregarlos = insertar filas en el catálogo (`definitions.py` → regenerar seed), no tocar el esquema.
 
 ## 3. Modelo: orden ≠ informe
@@ -75,7 +77,7 @@ paciente 1─N orden (borrador PRIVADO, se borra físicamente si se descarta)
 
 **Impresión**: solo `VIGENTE`. Cada impresión genera evento `IMPRESION` (reimpresión visible).
 
-**Colores**: versiones → fondo rojo claro (original) / verde (oficial), colaboración → rojo (A) / azul (B). Como el rojo significa cosas distintas y rojo/verde es difícil para daltónicos, **siempre acompañar el color con un icono o tachado/subrayado**.
+**Colores**: superficies de blanco, negro y grises neutros; rojo para acciones, iconos y jerarquía. Se conservan las banderas y estados semánticos: Bajo azul, Normal y guardado verdes, pendientes ámbar y Alto/error rojos. Versiones y colaboración se distinguen mediante etiquetas explícitas, iconos y, cuando corresponda, tachado/subrayado; nunca sólo mediante el color. La identidad de autor y colaborador no cambia.
 
 ## 5. Cálculo (motor en `backend/app/calculation/engine.py`)
 
@@ -85,12 +87,13 @@ paciente 1─N orden (borrador PRIVADO, se borra físicamente si se descarta)
 * Diferencial: se captura en **%** (0-100). Absoluto = `pct / 100 × GB`.
 * LDL (Friedewald) no se calcula con TG > 400 mg/dl.
 * El **backend es la única fuente de verdad**; la vista previa llama a `/calcular` con debounce. No duplicar fórmulas en TypeScript.
-* Valores por defecto (`requiere_confirmacion`): se muestran marcados "sin confirmar" y **bloquean la publicación** hasta que el bioquímico los confirme.
+* En captura por campos utilizados, un campo sin usar permanece vacío. Los valores por defecto del catálogo no se convierten automáticamente en resultados. Un resultado utilizado que requiera confirmación debe confirmarse.
 * GR y Hb del hemograma se rotulan **"(estimado)"** en el informe.
 
 ## 6. Sesión y seguridad
 
-* "Cerrar sesión al cerrar pestaña/apagar PC" **no es detectable** por el navegador. Solución: access token en memoria + refresh en cookie `httpOnly`/`Secure`/`SameSite=Strict` + **latido cada 30 s**; sin latido durante 150 s la sesión muere en el servidor. Además timeout por inactividad (30 min) y tope absoluto (12 h). Un F5 **no** cierra sesión (se re-autentica con el refresh).
+* La política de sesión se configura por entorno. `MODO_PRODUCCION=true` aplica expiración tras `SESSION_IDLE_TIMEOUT_MINUTES` sin actividad humana (60 min por defecto); los heartbeats y refresh automáticos no cuentan como actividad. `MODO_PRODUCCION=false` no aplica límite de inactividad, pero conserva `SESSION_ABSOLUTE_TIMEOUT_HOURS` (24 h por defecto). El access token vive en memoria; el refresh permanece en cookie `HttpOnly`, `SameSite=Strict` y `Secure` en producción. La vigencia del access token es independiente y se renueva mientras la sesión siga vigente.
+* El navegador no garantiza detectar el cierre de una pestaña o aplicación ni revocar inmediatamente la sesión; una cookie de sesión puede restaurarse si el navegador restaura la sesión. No se persisten tokens en `localStorage` ni `sessionStorage`.
 * Contraseñas **Argon2id**. Usuarios nuevos y resets del admin → `debe_cambiar_password = TRUE`. Bloqueo temporal tras N intentos. El admin nunca ve contraseñas.
 * **Usuarios no se borran**: baja lógica (`activo = false`), porque firman informes.
 * Toda regla de visibilidad se aplica **en el backend** (no solo ocultando botones) y con tests por rol.
@@ -158,7 +161,7 @@ Congela todo lo necesario para reimprimir idéntico aunque el catálogo cambie:
 1. Ácido úrico: 2,5-7,0 (perfiles) vs 1,5-7,0 (hoja VN).
 2. HbA1c 6,0-8,3 % (no es un rango de normalidad estándar).
 3. Fósforo: 2,5-5,0 (la mayoría) vs 2,5-5,6 (HC-QMC).
-4. GOT/AST: 37 (perfiles) vs 40 (HC-QMC) vs 39 (VN). GPT/ALT: 45 vs 40 vs 39.
+4. **Resuelto el 24/11/2026 por instrucción del laboratorio:** GOT/AST y GPT/ALT tienen referencia predeterminada **Hasta 40 UI/L**, inclusiva. Se retira `requiere_validacion` de estas dos referencias; ver D3-14.
 5. Fosfatasa alcalina: 98-279 vs 25-90 (VN).
 6. "Hepatitis A (Ag. superficie)": el Excel la rotula así; confirmar la denominación.
 7. El diferencial del Excel no incluye basófilos y la imagen sí; confirmar si se agrega.
@@ -192,19 +195,22 @@ Congela todo lo necesario para reimprimir idéntico aunque el catálogo cambie:
 * **D3-02** El backend es la única fuente de verdad del cálculo. `POST /calcular` es una vista previa sin escritura; `PUT /resultados` persiste y recalcula todo. El cliente NUNCA envía valores de parámetros calculados.
 * **D3-03** Qué se captura: los parámetros de la versión de estudio congelada en la orden. En estudios de selección parcial, solo los parámetros cuyo `grupo` figura en `orden_estudio_grupos`.
 * **D3-04** Valores: NUMERICO acepta coma o punto; se guarda con punto en `valor_numerico` tal cual lo digitó (sin redondear); máx. 6 decimales; no negativos. SELECCION debe estar en `opciones`. TEXTO ≤ 500 caracteres; RECUENTO ≤ 50; FECHA ISO no futura (se guarda como texto `AAAA-MM-DD`). Vacío = ausente: nunca se guarda 0 ni cadena vacía.
-* **D3-05** Valores por defecto (`requiere_confirmacion`): se muestran como **virtuales** (no se guardan). Solo cuentan para completar cuando existe una fila `confirmado = TRUE`, creada al confirmarlos explícitamente o al editarlos a mano.
-* **D3-06** Una orden es `COMPLETO` si todo parámetro `obligatorio` del alcance está resuelto: capturado y confirmado, o CALCULADO calculable, o CALCULADO no calculable por regla de validez/división por cero (p. ej. LDL con TG > 400 se informa "No calculable" y NO bloquea). CALCULADO sin entradas completas = pendiente. Una regla cruzada de severidad ERROR bloquea `COMPLETO`; ADVERTENCIA no.
+* **D3-05** Los valores por defecto no se precargan como resultados ni se convierten en entradas utilizadas al abrir un borrador, incluido un catálogo anterior. Una entrada utilizada que requiera confirmación debe estar confirmada explícitamente o por su edición manual.
+* **D3-06** En todos los borradores, incluidos los de catálogos anteriores sin `seleccion_campos`, una orden es `COMPLETO` al tener al menos un resultado utilizado y no contener entradas utilizadas incompletas, sin confirmar ni errores de validación. Vacíos y `--` se omiten, incluidos sus derivados por falta de entradas. Un positivo semicuantitativo iniciado sin los datos necesarios bloquea la publicación. Las observaciones finales son opcionales: no se exige inventar texto para publicar.
 * **D3-07** Banderas por rango: se elige el rango por sexo del paciente (o ambos) y, si el rango trae `edad_min/max_meses`, por la edad de la orden en meses. Respeta límites inclusivos/exclusivos. Solo para valores numéricos; los cualitativos no llevan bandera en v1.
 * **D3-08** Los calculados se persisten (`es_calculado = TRUE`); si no son calculables por regla, fila con `calculable = FALSE` y valor NULL; si faltan entradas, sin fila.
 * **D3-09** Guardar resultados NO modifica `ordenes.fila_version` (esa versión protege solo la cabecera). Dos pestañas del mismo autor = última escritura gana por parámetro; cada escritura bloquea la fila de la orden (`FOR UPDATE`).
 * **D3-10** La API usa el punto decimal como formato canónico. La interfaz muestra según `laboratorio_config.separador_decimal` (hoy sembrado en coma). La decisión de negocio sobre el separador sigue pendiente (§10, punto 9).
 * **D3-11** PENDIENTE: valores críticos y límites fisiológicos (p. ej. % > 100); permitir reemplazar GR/Hb estimados por valor medido (v1.1).
+* **D3-12** Grupo y Factor RH no tienen Unidad en captura, vista previa ni nuevos informes. Su selección se valida contra las opciones del catálogo y se guarda como texto simple. Los borradores de la captura anterior con selección y unidad en JSON siguen siendo legibles: se conserva la selección y se omite su antigua unidad. Los informes publicados conservan sus snapshots y su presentación histórica.
+* **D3-13** Los seis parámetros numéricos de Coagulación tienen unidades editables de texto libre de hasta 30 caracteres. Inicialmente se muestran las unidades de su versión de catálogo (`min`, `seg`, `%`); INR continúa sin unidad predeterminada. La personalización se guarda por resultado en `resultados_borrador.unidad_override` mediante la migración `0021`, separada del valor numérico Decimal. `NULL` restablece la unidad del catálogo; texto vacío representa una unidad borrada explícitamente. Editar una unidad no convierte números ni modifica fórmulas, referencias o banderas. Una unidad sola no constituye resultado ni permite publicar un informe vacío. Guardado, cálculo y vista previa aceptan `unidades_override` sólo para Coagulación y validan alcance y permisos en backend; los resultados utilizados congelan su unidad en nuevos snapshots.
+* **D3-14** GOT/AST y GPT/ALT del Hepatograma / Perfil Hepático usan **VR: Hasta 40 UI/L**, con límite superior inclusivo: 40 es Normal y cualquier valor mayor que 40 es Alto. La fuente es `definitions.py`; la migración `0022` sincroniza las referencias genéricas del catálogo en sus versiones existentes. Se conservan los resultados capturados, las referencias personalizadas por orden y los snapshots de informes publicados.
 
 ## 13. Decisiones de Fase 3.5 (correcciones)
 
 * **D35-01** No hay CORS: frontend y API comparten origen (Caddy en producción, proxy de Vite en desarrollo). No se sirve el frontend desde el backend. `/docs` y `/openapi.json` están desactivados salvo `ENABLE_DOCS=true`.
-* **D35-02** El tiempo de sesión lo configura el ADMIN en `laboratorio_config`: intervalo de latido (10–120 s), sesión muerta sin latido (≥ 3× el intervalo y ≤ 1800 s), inactividad (5–480 min) y tope absoluto (1–24 h). Los valores por defecto siguen siendo 30 s / 150 s / 30 min / 12 h. El tope absoluto se aplica a sesiones nuevas.
-* **D35-03** La inactividad se mide con **actividad real del usuario** (ratón, teclado, toque, desplazamiento) que el navegador comunica en el latido (`actividad: true`). Un latido sin actividad NO renueva la inactividad.
+* **D35-02** La política de sesión la configura el entorno del backend: `MODO_PRODUCCION`, `SESSION_IDLE_TIMEOUT_MINUTES` (60 por defecto) y `SESSION_ABSOLUTE_TIMEOUT_HOURS` (24 por defecto). El modo de desarrollo no desactiva el tope absoluto, cookies seguras en producción, autorización ni políticas de contraseña.
+* **D35-03** La inactividad se mide con señales autenticadas de interacción real (ratón, teclado, toque o desplazamiento) que el navegador comunica en el latido (`actividad: true`). El backend no confía en timestamps del cliente; heartbeat automático, refresh y peticiones API no renuevan inactividad.
 * **D35-04** Los tests solo corren contra bases cuyo nombre termina en `_test`.
 * **D35-05** Los cambios de esquema de esta fase se hacen con la migración Alembic `0002`. El contenedor del backend ejecuta `alembic upgrade head` al arrancar.
 
@@ -216,4 +222,48 @@ Congela todo lo necesario para reimprimir idéntico aunque el catálogo cambie:
 * **D36-04** El menú pasa a barra lateral izquierda desplegable. "Pendientes" es una entrada propia con contador.
 * **D36-05** La vista previa de la captura es una representación en pantalla; el PDF oficial es de la Fase 5.
 * **D36-06** FUERA de esta fase: Estudio instantáneo, rol VISITANTE, notificaciones/temporizadores e impresión (ver `PROPUESTA_FUNCIONES_NUEVAS.md`).
+
+## 15. Captura decimal y vista previa de pantalla
+
+* **DC-01** Todo campo numérico acepta coma o punto decimal, incluidos Glóbulos Blancos, VES, Plaquetas, GOT/AST, GPT/ALT, Fosfatasa Alcalina y GGT. `decimales = 0` no permite quitar el separador ni redondear la entrada; se conserva la precisión capturada, hasta seis decimales (D3-04). Los miles se agrupan únicamente para mostrar; la API recibe texto canónico sin agrupación.
+* **DC-02** La vista previa se actualiza automáticamente al cambiar resultados, referencias, observaciones, etiquetas o estudios. Es de pantalla y solo permite ampliar a pantalla completa. El backend entrega imágenes de las páginas, sin ofrecer un PDF preliminar descargable. Impresión y descarga de PDF permanecen reservadas al informe oficial `VIGENTE` y sus permisos.
+* **DC-03** No se dibujan campos vacíos, defectos virtuales sin confirmar, derivados sin entradas ni estudios sin resultados. El cero capturado sí se muestra. Un derivado no calculable por regla o división por cero se muestra como «No calculable».
+* **DC-04** Todas las páginas son Carta vertical (215,9 × 279,4 mm), con membrete SVG repetido. El contenido comienza a 38 mm del borde superior; la vista previa y el informe oficial usan la misma plantilla paginada. Los nuevos informes congelan el separador decimal en el snapshot para conservar su formato al reimprimir.
+
+## 16. EGO e inmunoserología
+
+* **DS-01** El final del microscópico de EGO se ordena: Cristales, Cilindros, Bacterias, Otros.
+* **DS-02** Inmunoserología no presenta banderas. Las pruebas cualitativas llevan solo prueba y resultado en el informe, excepto las tres pruebas del grupo **SEROLOGIA**, que imprimen también Muestra y Método; las de entrada con unidad conservan Unidad; V. Ref. se reserva a PCR semicuantitativa, FR y ASTO. En captura, los controles tienen su columna **Captura** y el resultado final aparece al final.
+* **DS-03** Los cuatro Widal usan Negativo/Positivo. Positivo habilita 1/20, 1/40, 1/80, 1/160, 1/320 u Otro (texto 1/n). Son títulos sin cálculo de concentración y sin «dilución» como unidad física. La serie fue confirmada por el usuario.
+* **DS-04** PCR semicuantitativa usa MONLAB (6 mg/L), TECO (0,8 mg/dL) o sensibilidad propia; mantiene la dilución 1/n para el cálculo. FR usa Negativo/Positivo, dilución y sensibilidad de 8 UI/mL o propia; no solicita lote, vencimiento ni controles. ASTO conserva sensibilidad y cálculo, con sensibilidad estándar de 200 UI/mL o propia y etiquetas Negativo/Positivo. VDRL es una selección Negativo/Positivo.
+* **DS-05** Las configuraciones, fórmulas y sensibilidades viven en `definitions.py`, se publican en la configuración del catálogo y se calculan con Decimal mediante el motor seguro. La captura estructurada se guarda en `valor_texto`; resultado, unidad y referencia se congelan en el snapshot. Un positivo con entrada incompleta no puede publicarse. Los textos de borradores anteriores siguen siendo legibles, sin reescribir informes publicados.
+
+## 17. Campos utilizados y ampliación del catálogo
+
+* **DA-01** Un informe incluye únicamente campos utilizados. Vacío, espacios, `-`, `--` o guiones de presentación no son resultados. No se dibujan sus filas ni secciones o estudios vacíos, tanto en pantalla como en PDF. El cero sí es un resultado. Se permite publicar una selección de campos de los estudios solicitados; nunca un informe sin resultados.
+* **DA-02** PCR, FR y ASTO negativos se informan únicamente como «Negativo», sin sensibilidad, reactivo, unidad ni referencia en esa fila. VDRL ofrece `--`, Negativo y Positivo incluso al abrir un catálogo anterior.
+* **DA-03** Parasitología es independiente de Inmunoserología y conserva Helicobacter pylori (heces) y Sangre oculta en heces como selecciones Negativo/Positivo, sin Unidad, V. Ref. ni Bandera. Helicobacter pylori (suero) pasa a Inmunoserología; los tres subestudios quedan disponibles bajo el grupo seleccionable `PARASITOLOGIA`, que en la interfaz se titula **SEROLOGIA**. H. pylori en heces y Sangre oculta en heces también permanecen en Parasitología. En Inmunoserología, H. pylori en suero y heces se titulan **HELICOBACTER PYLORI** y se distinguen por Muestra; suero conserva Negativo/Positivo y heces junto con Sangre oculta usan Reactivo/No reactivo. Los tres muestran Muestra y Método tanto en captura como en el informe; Sangre oculta se titula **SANGRE OCULTA EN HECES**. `CHAGAS` es un subestudio seleccionable Negativo/Positivo. La migración `0016` crea versiones nuevas y traslada resultados de suero en borradores a Inmunoserología; `0019` agrega Muestra y Método; `0020` incorpora CHAGAS y sensibilidad propia de ASTO. Las migraciones conservan catálogos históricos e informes publicados. Moco fecal es una sección de diez campos de texto libre, en este orden: Aspecto, Restos alimenticios, PH, Moco fecal, Flora bacteriana, Eritrocitos, Leucocitos, Polimorfonucleares, Mononucleares y Coproparasitología. Estos diez campos no tienen límite de caracteres, no se precargan y no agregan cálculos ni rangos. La migración `0012` amplía todas las versiones de Parasitología y conserva el código/id y el texto previo de MOCO_FECAL; no altera resultados ni snapshots. Los campos vacíos siguen omitiéndose del informe.
+* **DA-04** Perfil Cardíaco incluye Troponina cualitativa (Negativo/Positivo, sin unidad, referencia ni bandera), CPK (25–192 UI/L), CK-MB (0–24 UI/L) y LDH (200–400 UI/L, inclusivo). En Perfil Pancreático, la fila UI/L se presenta como Lipasa sérica (10–150 UI/L, inclusivo) y la fila UA/dL como Amilasa sérica (hasta 120 UA/dL, inclusivo); se conservan las unidades y referencias de cada fila. Los numéricos tienen banderas y referencias editables por orden. La migración `0009` sincroniza el orden y las referencias del catálogo; conserva resultados, referencias personalizadas por orden e informes publicados.
+* **DA-05** Química añade Glicemia post prandial (misma referencia que Glicemia), Alcoholemia (0–100 mg/dL, inclusivo) y LDH (200–400 UI/L, inclusivo). Los rangos provienen del catálogo y sus modificaciones se guardan por orden.
+
+* **DA-06** Coproparasitológico simple es texto libre sin límite de caracteres. En captura e informe el título del subestudio basta: no se repite el nombre del campo junto al resultado. Seriado usa tres muestras iniciales, que no se eliminan, y permite añadir más, numeradas consecutivamente. Cada muestra admite fecha real, hora `HH:mm`, turno `MAÑANA`/`TARDE`/`NOCHE` y resultado de texto libre. Hora y turno son opcionales; una fila iniciada sigue exigiendo fecha y resultado para publicar. La frase «No se observan formas parasitarias» es una sugerencia gris: sólo se convierte en resultado al aceptarla explícitamente con un clic. Abrir la captura, añadir filas o elegir una fecha nunca inventa ese resultado. Una fila vacía no se informa; una fila iniciada se guarda parcialmente. Fecha y hora no pueden ser futuras y se validan en el backend. Las muestras se guardan estructuradas en valor_texto; el snapshot congela sus valores, incluida hora y turno cuando existen. La migración `0013` conserva IDs, resultados anteriores e informes publicados. El texto histórico de Seriado sigue visible sin inventar fechas y se reemplaza por muestras sólo por acción explícita del operador. Muestras guardadas antes de hora y turno se reabren con esos datos vacíos.
+
+## 18. Presentación oficial y publicación (19/11/2026)
+
+* **DI-01** El informe publicado se visualiza exclusivamente con el documento generado por la plantilla backend. Mientras carga el PDF se muestra un estado de espera, sin montar una plantilla HTML alternativa. La versión del documento se fija a la versión de los metadatos resueltos; los cambios de folio o versión cancelan las solicitudes anteriores.
+* **DI-02** El hash del snapshot, el número de versión y los timestamps completos permanecen en el almacenamiento y la trazabilidad, pero no se imprimen en el cuerpo del informe. El folio permanece visible.
+* **DI-03** Se imprimen **Fecha: día/mes/año**, **Hora de toma de muestra** y **Hora de entrega de resultado** en `America/La_Paz`. La fecha del informe oficial y la hora de entrega provienen de su publicación. La hora de toma usa `fecha_hora_toma_muestra`, con la creación de la orden como respaldo. Los nuevos snapshots congelan también `orden.creado_en`; para informes anteriores se consulta esa fecha de creación existente sin modificar el snapshot. En borradores, Fecha usa el inicio y la entrega dice «Pendiente de publicación»; una hora ausente nunca se inventa.
+* **DI-04** El responsable sigue siendo el autor original. Se presenta con prefijo **LIC.**, sin imprimir matrícula, aunque esté registrada. La línea de firma y el nombre se repiten al pie de cada hoja, con una zona reservada de 48 mm para firma y membrete inferior. La firma conserva su posición aunque sobren espacios después de los resultados.
+* **DI-05** Un estudio se mantiene completo si cabe en una página. Puede compartir la hoja anterior sólo si cabe íntegro en el espacio disponible antes de la firma. Si no cabe, empieza en otra hoja. Un estudio mayor que una hoja empieza en hoja nueva después del anterior y continúa con filas sin dividir y encabezados repetidos, respetando el área de firma.
+* **DI-06** Versiones desplazadas, papelera y reciclaje se consultan como imágenes de la misma plantilla oficial mediante un endpoint autenticado, sin habilitar descarga PDF ni impresión ni registrar una emisión. `/pdf` mantiene la restricción a `VIGENTE` y su evento de emisión.
+* **DI-07** La interfaz espera el guardado confirmado antes de publicar. Un error de persistencia o cambios todavía pendientes detienen la publicación y permiten reintentar. El backend vuelve a validar los resultados utilizados antes de reservar el folio en su transacción existente.
+
+## 19. Estadísticas operativas y catálogo independiente
+
+* **DE-01** `GET /api/estadisticas` devuelve únicamente agregados de actividad y metadatos mínimos de profesionales. BIOQUIMICO consulta sus órdenes como autor original; intentar filtrar otro autor recibe 403. ADMIN consulta el laboratorio y puede filtrar responsable, incluidos profesionales inactivos. La respuesta nunca incluye pacientes, resultados ni snapshots. La consulta administrativa de conjuntos no vacíos se registra como `ADMIN_VE_PRIVADO`, sin contenido clínico.
+* **DE-02** El período incluye órdenes por `creado_en`, con fechas inclusivas en `America/La_Paz`, hasta 366 días. Por defecto, últimos 30 días. La serie diaria refleja la fecha de inicio y cuántas órdenes de cada día ya fueron publicadas, aunque la entrega fuera posterior al período; no se presenta como publicaciones efectuadas ese día. Los descartes físicos no forman parte de las órdenes existentes.
+* **DE-03** Cada orden y su primera publicación V1 se cuentan una vez. Reediciones V2/V3, vistas previas y reimpresiones no incrementan entregas. Publicaciones después desplazadas, enviadas a papelera o recicladas conservan su primera entrega histórica. El volumen de estudios usa los estudios con parámetros del snapshot de esa primera publicación; no suma estudios solicitados sin resultados.
+* **DE-04** Tiempo de respuesta = primera publicación menos toma de muestra, con creación de la orden como respaldo cuando falta la toma. Intervalos negativos o ausentes se excluyen de la mediana y se muestran como entregas «Sin hora válida»; no se convierten en cero. El cero real es válido. Se usa mediana discreta sobre valores NUMERIC y se transmite texto decimal en minutos, sin resultados clínicos ni fórmulas nuevas.
+* **DE-05** El filtro de respuesta se aplica a todos los agregados del conjunto: todos, hasta 60 minutos inclusive, más de 60 hasta 240 inclusive, más de 240, o publicadas sin hora válida. Al seleccionar un intervalo quedan sólo órdenes publicadas con dicho intervalo. Los tramos organizan la visualización; no establecen metas clínicas ni criterios de calidad profesional.
+* **DE-06** Catálogo pasa a `/catalogo`, sin modificar estudios, fórmulas ni estructura clínica. Perfiles rápidos conservan sus endpoints y permisos personales; sólo se amplía el detalle visible de los estudios y grupos guardados. `/estadisticas` añade un acceso propio para ambos roles.
 

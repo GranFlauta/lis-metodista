@@ -7,6 +7,7 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { listarOrdenesApi, obtenerResumenOrdenesApi, OrdenListItem } from "../../api/ordenes";
 import { useAuth } from "../auth/AuthProvider";
+import { MarcaLaboratorio, CargaLaboratorio } from "../../components/MarcaLaboratorio";
 
 // Iconos SVG en línea sobrios
 const IconPlus = () => (
@@ -50,36 +51,10 @@ const IconList = () => (
   </svg>
 );
 
-const IconShare2 = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <circle cx="18" cy="5" r="3" />
-    <circle cx="6" cy="12" r="3" />
-    <circle cx="18" cy="19" r="3" />
-    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-  </svg>
-);
-
-const IconHistory = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-    <path d="M3 3v5h5" />
-    <path d="M12 7v5l4 2" />
-  </svg>
-);
-
 const IconClipboard = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
     <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-  </svg>
-);
-
-const IconPrinter = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <polyline points="6 9 6 2 18 2 18 9" />
-    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
-    <rect x="6" y="14" width="12" height="8" />
   </svg>
 );
 
@@ -151,6 +126,14 @@ export const HomePage: React.FC = () => {
 
   return (
     <div className="lis-home-container">
+      <section className="lis-home-cover" aria-label="Laboratorio Metodista">
+        <div className="lis-home-cover-brand"><MarcaLaboratorio /><div>
+          <span className="lis-eyebrow">Hospital Metodista · Laboratorio clínico</span>
+          <h2>BIENVENIDO, LIC. {[usuario?.nombres, usuario?.apellido_paterno, usuario?.apellido_materno].filter(Boolean).join(" ")}</h2>
+          <p>Pacientes, estudios y resultados en tu espacio de trabajo.</p>
+        </div></div>
+        <div className="lis-home-cover-meta"><span>Tu jornada</span><strong>{new Intl.DateTimeFormat("es-BO", { weekday: "long", day: "numeric", month: "long", timeZone: "America/La_Paz" }).format(new Date())}</strong></div>
+      </section>
       {/* 1. Fila de acciones rápidas (botones grandes) */}
       <div className="lis-quick-actions" role="region" aria-label="Acciones rápidas">
         {!esAdmin && (
@@ -186,44 +169,16 @@ export const HomePage: React.FC = () => {
             </Link>
           </>
         )}
+        <Link to="/informes" className="lis-btn-quick">
+          <IconClipboard />
+          <span>Informes</span>
+        </Link>
       </div>
 
-      {/* Menú Horizontal de Módulos Complementarios (§8) */}
+      {/* Accesos a módulos disponibles, sin pantallas intermedias */}
       <div className="lis-modulos-futuros-bar" role="region" aria-label="Módulos complementarios">
-        <button type="button" className="lis-modulo-btn" title="Módulo colaborativo en desarrollo">
-          <span className="lis-modulo-btn-title">
-            <IconShare2 /> Órdenes colaborativas
-          </span>
-          <span className="lis-modulo-btn-sub">(Próximamente)</span>
-        </button>
-
-        <button type="button" className="lis-modulo-btn" title="Histórico y recuperación de estados">
-          <span className="lis-modulo-btn-title">
-            <IconHistory /> Restaurados
-          </span>
-          <span className="lis-modulo-btn-sub">(Próximamente)</span>
-        </button>
-
-        <button type="button" className="lis-modulo-btn" title="Consolidado de historial clínico por paciente">
-          <span className="lis-modulo-btn-title">
-            <IconClipboard /> Historial clínico
-          </span>
-          <span className="lis-modulo-btn-sub">(Próximamente)</span>
-        </button>
-
-        <button type="button" className="lis-modulo-btn" title="Impresión centralizada por lotes">
-          <span className="lis-modulo-btn-title">
-            <IconPrinter /> Imprimir
-          </span>
-          <span className="lis-modulo-btn-sub">(Próximamente)</span>
-        </button>
-
-        <button type="button" className="lis-modulo-btn" title="Gestión de órdenes y descartes">
-          <span className="lis-modulo-btn-title">
-            <IconTrash2 /> Papelera
-          </span>
-          <span className="lis-modulo-btn-sub">(Próximamente)</span>
-        </button>
+        <span className="lis-shortcuts-label">Accesos directos</span>
+        <Link to="/papelera" className="lis-modulo-btn"><span className="lis-modulo-btn-title"><IconTrash2 /> Papelera y reciclaje</span></Link>
       </div>
 
       {/* 2. Panel horizontal 'Recientes' a todo el ancho (últimos 15 trabajos) */}
@@ -236,7 +191,7 @@ export const HomePage: React.FC = () => {
         </div>
 
         {cargando && (
-          <div className="lis-table-loading">Cargando trabajos recientes…</div>
+          <CargaLaboratorio mensaje="Cargando trabajos recientes…" />
         )}
 
         {error && (

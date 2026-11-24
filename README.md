@@ -1,22 +1,13 @@
 # LIS — Sistema de Información de Laboratorio Clínico
 
 Servidor local (on-premise): **PostgreSQL 16 + FastAPI + React/Vite + Caddy (HTTPS)** con Podman / Docker Compose.
-Las reglas de negocio y todas las decisiones están en **[docs/DECISIONES.md](docs/DECISIONES.md)** (léelo primero).
+Para retomar trabajo, lee primero **[docs/CONTEXTO_PROYECTO.md](docs/CONTEXTO_PROYECTO.md)**, luego [AGENTS.md](AGENTS.md) y [docs/DECISIONES.md](docs/DECISIONES.md). Antes de cambios frontend, consulta [docs/UX_GUIDE.md](docs/UX_GUIDE.md).
 
-## Estado: Fase 3.5 (En curso)
+## Estado
 
-- **Listo (Fases 0 a 3)** — tag `fase-3-cerrada`:
-  - Esquema de base de datos (`001_schema.sql`) con bajas lógicas y auditoría.
-  - Catálogo de 9 estudios y 2 perfiles con motor de cálculo determinista (sin `eval`, `Decimal`).
-  - Autenticación Argon2id, sesiones por latido con access token en memoria y refresh en cookie `HttpOnly` `SameSite=Strict`.
-  - Gestión de usuarios (`ADMIN`) y CLI `crear-admin`.
-  - Pacientes, órdenes en borrador y detección de trabajo duplicado (Fase 2).
-  - Captura de resultados, cálculo en vivo, banderas por sexo/edad, reglas cruzadas y completitud (Fase 3).
-  - Suite de **119 tests** (`unittest`) pasando contra PostgreSQL real, sin `skipped`.
-- **En curso (Fase 3.5)**: endurecimiento de red (sin CORS ni ngrok), guarda de BD de pruebas, sesión configurable por el ADMIN con actividad real del usuario. Ver `PROMPT_FASE_3_5_CORRECCIONES.md` y `docs/DECISIONES.md §13`.
-- **Siguiente (Fase 3.6)**: rediseño UX fiel a Excel según `docs/UX_GUIDE.md` (`PROMPT_FASE_3_6_UX.md`).
-- **Pendiente (Fases 4+)**: publicación con folio, PDF oficial, versiones, delegación (ver `docs/DECISIONES.md §9`).
-  - **Control de ediciones**: un informe oficial publicado admite como máximo **3 versiones por folio** (V1 original → V2 → V3), lo forzado por el `CHECK` de `informes.numero_version` en el esquema. Solo el firmante edita, siempre con justificativo; un número alto de correcciones es una señal de control que debe revisarse (ver `docs/DECISIONES.md §3–§4`).
+El proyecto ya incluye autenticación y roles, pacientes, órdenes, captura y cálculo clínico, catálogo versionado, informes oficiales y vista previa PDF, perfiles, curva de tolerancia, coproparasitología y estadísticas. Los documentos de fases conservan el historial; **no uses sus etiquetas de fase como estado actual**.
+
+Último estado reportado el 24/11/2026: la base activa estaba en Alembic `0019`; `0020_inmunoserologia_chagas_asto.py` está creada y pendiente de autorización/aplicación. Verifica la base antes de ejecutar migraciones. El mapa de módulos y cambios pendientes está en [docs/CONTEXTO_PROYECTO.md](docs/CONTEXTO_PROYECTO.md).
 
 ## Estructura del Proyecto
 
@@ -28,11 +19,14 @@ backend/app/api/                Endpoints: auth, usuarios, pacientes, ordenes, c
 backend/app/services/           evaluacion_service.py (cálculo, banderas, reglas, completitud)
 backend/app/calculation/        Motor de fórmulas (sin eval, Decimal)
 backend/app/catalog/            definitions.py = fuente única del catálogo
+backend/app/reports/            Presentación, plantilla HTML Jinja, generación de vista previa/PDF y assets
 backend/app/core/               clock.py (reloj determinista), errors.py, security.py, config.py
 backend/app/cli.py              CLI para crear administrador inicial
-backend/tests/                  Suite de 119 tests (unittest, PostgreSQL real)
+backend/tests/                  Pruebas unitarias e integración (esta última requiere PostgreSQL _test)
 frontend/src/api/               Cliente HTTP con Bearer en memoria y reintento de refresh
-frontend/src/features/          auth, admin, home, pacientes, ordenes, ...
+frontend/src/features/          auth, admin, home, pacientes, ordenes, informes, catalogo, estadisticas
+backend/app/reports/templates/informe.html  Plantilla real compartida por vista previa y PDF oficial
+frontend/index.html             Carcasa de Vite; monta la aplicación React
 scripts/                        crear_bd_test.sh, backup.sh, restaurar.sh, generar_seed_sql.py
 docs/                           DECISIONES, SUPUESTOS, UX_GUIDE, CONTEXTO_PROYECTO
 docs/historial/                 Prompts, evaluaciones y evidencias de fases cerradas
@@ -64,20 +58,7 @@ podman exec -it lis_backend_1 python -m app.cli crear-admin
 
 ## Ejecución de Tests
 
-La suite completa consta de **119 pruebas**:
-
-| Archivo | Tests |
-|---|---|
-| `test_calculo_y_catalogo.py` | 25 |
-| `test_ordenes.py` | 25 |
-| `test_resultados_api.py` | 16 |
-| `test_evaluacion.py` | 11 |
-| `test_sesion.py` | 9 |
-| `test_pacientes.py` | 8 |
-| `test_password.py` | 8 |
-| `test_usuarios.py` | 8 |
-| `test_login.py` | 6 |
-| `test_catalogo_api.py` | 3 |
+La cantidad de pruebas cambia al ampliar el catálogo. Las pruebas de integración usan una base PostgreSQL exclusiva cuyo nombre termina en `_test`; no apuntes la suite a la base activa.
 
 ```bash
 # A) Tests unitarios (sin base de datos)

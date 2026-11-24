@@ -52,7 +52,7 @@ def generar() -> str:
         L.append("INSERT INTO estudios (codigo, nombre, categoria, seleccion_parcial) "
                  f"VALUES ({q(est.codigo)}, {q(est.nombre)}, {q(est.categoria)}, {q(est.seleccion_parcial)});")
         L.append("INSERT INTO estudio_versiones (id_estudio, numero_version, configuracion_json) "
-                 f"SELECT id_estudio, 1, {qjson({'reglas': list(est.reglas)})} FROM estudios WHERE codigo = {q(est.codigo)};")
+                 f"SELECT id_estudio, 1, {qjson({'reglas': list(est.reglas), 'captura': est.captura, 'seleccion_campos': est.seleccion_campos})} FROM estudios WHERE codigo = {q(est.codigo)};")
         for orden, p in enumerate(est.parametros, start=1):
             formula = p.formula
             L.append(

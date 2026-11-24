@@ -67,6 +67,7 @@ class InformeDetalleResponse(BaseModel):
     justificativo: Optional[str]
     publicado_en: datetime
     snapshot_json: dict[str, Any]
+    estudios_informe: list[dict[str, Any]] = []
     snapshot_sha256: str
     firmante: dict[str, Any]
     publicador: dict[str, Any]

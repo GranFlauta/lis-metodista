@@ -9,6 +9,7 @@
  */
 
 import React, { useEffect, useState, useCallback } from "react";
+import { CargaLaboratorio } from "../../components/MarcaLaboratorio";
 import {
   crearUsuarioApi,
   desactivarUsuarioApi,
@@ -317,7 +318,7 @@ export const UsuariosPage: React.FC = () => {
       {/* Tabla de Usuarios */}
       <div className="lis-table-card">
         {cargando ? (
-          <div className="lis-table-loading">Cargando usuarios...</div>
+          <CargaLaboratorio mensaje="Cargando usuarios…" />
         ) : usuarios.length === 0 ? (
           <div className="lis-table-empty">No se encontraron usuarios con los filtros indicados.</div>
         ) : (
@@ -367,7 +368,7 @@ export const UsuariosPage: React.FC = () => {
                             })
                           : "Nunca"}
                       </td>
-                      <td className="lis-text-right lis-actions-cell">
+                      <td><div className="lis-actions-cell">
                         <button
                           type="button"
                           className="lis-btn lis-btn-sm lis-btn-secondary"
@@ -410,7 +411,7 @@ export const UsuariosPage: React.FC = () => {
                             Reactivar
                           </button>
                         )}
-                      </td>
+                      </div></td>
                     </tr>
                   );
                 })}

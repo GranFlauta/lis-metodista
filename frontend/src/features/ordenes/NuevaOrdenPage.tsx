@@ -28,6 +28,8 @@ import {
 } from "../../api/ordenes";
 import { ApiError } from "../../api/client";
 import { capitalizarNombrePropio } from "../../utils/formatoTexto";
+import { resumenEstudiosPerfil, SeleccionSubestudios } from "../../components/EstudiosPerfil";
+import { CargaLaboratorio } from "../../components/MarcaLaboratorio";
 
 function obtenerFechaHoraActualLocal(): string {
   const d = new Date();
@@ -51,6 +53,36 @@ function calcularEdadAnios(fechaNacimiento: string | null | undefined): number |
     anios--;
   }
   return Math.max(0, anios);
+}
+
+function catalogoParaSeleccion(estudios: EstudioCatalogo[]): EstudioCatalogo[] {
+  const codigoParasitologia = "PARASITOLOGIA";
+  const tieneParasitologiaIndependiente = estudios.some((estudio) => estudio.codigo === codigoParasitologia);
+  if (tieneParasitologiaIndependiente) return estudios;
+  const grupoLegado = estudios
+    .find((estudio) => estudio.codigo === "INMUNOSEROLOGIA")
+    ?.grupos?.some((grupo) => grupo.codigo === codigoParasitologia);
+
+  return estudios.flatMap((estudio) => {
+    if (estudio.codigo !== "INMUNOSEROLOGIA") return [estudio];
+
+    const inmunoserologia = {
+      ...estudio,
+      grupos: estudio.grupos?.filter((grupo) => grupo.codigo !== codigoParasitologia),
+    };
+    if (tieneParasitologiaIndependiente || !grupoLegado) return [inmunoserologia];
+
+    return [
+      inmunoserologia,
+      {
+        codigo: codigoParasitologia,
+        nombre: "Parasitología",
+        categoria: "Parasitología",
+        seleccion_parcial: false,
+        grupos: null,
+      },
+    ];
+  });
 }
 
 export const NuevaOrdenPage: React.FC = () => {
@@ -96,6 +128,11 @@ export const NuevaOrdenPage: React.FC = () => {
   const [perfilActivo, setPerfilActivo] = useState<string>("");
   const [estudiosSeleccionados, setEstudiosSeleccionados] = useState<Set<string>>(new Set());
   const [gruposInmunosero, setGruposInmunosero] = useState<Set<string>>(new Set());
+  const estudiosParaSeleccion = catalogoParaSeleccion(estudiosCatalogo);
+  const catalogoTieneParasitologiaIndependiente = estudiosCatalogo.some((estudio) => estudio.codigo === "PARASITOLOGIA");
+  const catalogoTieneGrupoParasitologiaLegado = estudiosCatalogo
+    .find((estudio) => estudio.codigo === "INMUNOSEROLOGIA")
+    ?.grupos?.some((grupo) => grupo.codigo === "PARASITOLOGIA") ?? false;
 
   // Datos de la Orden
   const [medicoSolicitante, setMedicoSolicitante] = useState<string>("");
@@ -253,17 +290,27 @@ export const NuevaOrdenPage: React.FC = () => {
     const nuevosGrupos = new Set<string>();
 
     for (const item of perfil.estudios) {
-      nuevosEstudios.add(item.codigo);
       if (item.codigo === "INMUNOSEROLOGIA" && item.grupos) {
-        for (const g of item.grupos) {
-          nuevosGrupos.add(g);
+        const convierteParasitologiaLegada = !catalogoTieneParasitologiaIndependiente;
+        const grupos = convierteParasitologiaLegada
+          ? item.grupos.filter((grupo) => grupo !== "PARASITOLOGIA")
+          : item.grupos;
+        if (convierteParasitologiaLegada && item.grupos.includes("PARASITOLOGIA")) {
+          nuevosEstudios.add("PARASITOLOGIA");
         }
+        if (grupos.length > 0 || item.grupos.length === 0) nuevosEstudios.add(item.codigo);
+        grupos.forEach((grupo) => nuevosGrupos.add(grupo));
+        continue;
       }
+      nuevosEstudios.add(item.codigo);
     }
 
     setEstudiosSeleccionados(nuevosEstudios);
     if (rapido) {
-      const grupoInmuno = rapido.estudios.find((item) => item.codigo === "INMUNOSEROLOGIA")?.grupos || [];
+      const gruposRapidos = rapido.estudios.find((item) => item.codigo === "INMUNOSEROLOGIA")?.grupos || [];
+      const grupoInmuno = catalogoTieneParasitologiaIndependiente
+        ? gruposRapidos
+        : gruposRapidos.filter((grupo) => grupo !== "PARASITOLOGIA");
       setGruposInmunosero(new Set(grupoInmuno));
     } else {
       setGruposInmunosero(nuevosGrupos);
@@ -282,7 +329,7 @@ export const NuevaOrdenPage: React.FC = () => {
     } else {
       copia.add(codigoEstudio);
       if (codigoEstudio === "INMUNOSEROLOGIA") {
-        const inmu = estudiosCatalogo.find((e) => e.codigo === "INMUNOSEROLOGIA");
+        const inmu = estudiosParaSeleccion.find((e) => e.codigo === "INMUNOSEROLOGIA");
         if (inmu?.grupos) {
           setGruposInmunosero(new Set(inmu.grupos.map((g) => g.codigo)));
         }
@@ -349,15 +396,31 @@ export const NuevaOrdenPage: React.FC = () => {
     setConflictoPacienteId(null);
 
     // 1. Estudios payload
-    const estudiosPayload: EstudioItemCreate[] = Array.from(estudiosSeleccionados).map((codigo) => {
+    const compatibilidadParasitologiaLegada =
+      !catalogoTieneParasitologiaIndependiente && catalogoTieneGrupoParasitologiaLegado;
+    const codigosPayload = Array.from(estudiosSeleccionados).filter(
+      (codigo) => !(codigo === "PARASITOLOGIA" && compatibilidadParasitologiaLegada)
+    );
+    const estudiosPayload: EstudioItemCreate[] = codigosPayload.map((codigo) => {
       if (codigo === "INMUNOSEROLOGIA") {
+        const grupos = new Set(gruposInmunosero);
+        if (compatibilidadParasitologiaLegada && estudiosSeleccionados.has("PARASITOLOGIA")) {
+          grupos.add("PARASITOLOGIA");
+        }
         return {
           codigo,
-          grupos: Array.from(gruposInmunosero),
+          grupos: Array.from(grupos),
         };
       }
       return { codigo };
     });
+    if (
+      compatibilidadParasitologiaLegada &&
+      estudiosSeleccionados.has("PARASITOLOGIA") &&
+      !estudiosSeleccionados.has("INMUNOSEROLOGIA")
+    ) {
+      estudiosPayload.push({ codigo: "INMUNOSEROLOGIA", grupos: ["PARASITOLOGIA"] });
+    }
 
     // 2. Paciente payload si es nuevo o edad manual
     let pacPayload: PacienteCreatePayload | null = null;
@@ -522,7 +585,7 @@ export const NuevaOrdenPage: React.FC = () => {
                       style={{
                         marginTop: "8px",
                         padding: "8px 12px",
-                        backgroundColor: "#fff7ed",
+                        backgroundColor: "var(--warning-bg)",
                         border: "1.5px solid #fb923c",
                         borderRadius: "var(--radius)",
                         display: "flex",
@@ -533,7 +596,7 @@ export const NuevaOrdenPage: React.FC = () => {
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
                         <label
                           htmlFor="edad-paciente-manual-input"
-                          style={{ fontSize: "12.5px", fontWeight: 700, color: "#9a3412" }}
+                          style={{ fontSize: "12.5px", fontWeight: 700, color: "var(--warning)" }}
                         >
                           Edad del paciente (años) *:
                         </label>
@@ -555,11 +618,11 @@ export const NuevaOrdenPage: React.FC = () => {
                             textAlign: "center",
                             border: "1.5px solid #ea580c",
                             borderRadius: "var(--radius)",
-                            backgroundColor: "#ffffff",
+                            backgroundColor: "var(--bg-card)",
                           }}
                         />
                       </div>
-                      <span style={{ fontSize: "11px", color: "#c2410c", fontWeight: 500 }}>
+                      <span style={{ fontSize: "11px", color: "var(--warning)", fontWeight: 500 }}>
                         Paciente sin fecha de nacimiento registrada. Indique su edad en años para habilitar y calcular la orden.
                       </span>
                     </div>
@@ -597,6 +660,7 @@ export const NuevaOrdenPage: React.FC = () => {
 
                   {/* Lista con scroll de pacientes existentes sin romper la ventana (§7) */}
                   <div
+                    className="lis-table-responsive lis-patient-picker"
                     style={{
                       marginTop: "8px",
                       maxHeight: "180px",
@@ -607,51 +671,45 @@ export const NuevaOrdenPage: React.FC = () => {
                       backgroundColor: "var(--bg-card, #ffffff)",
                     }}
                   >
-                    {cargandoPacientes ? (
-                      <div style={{ padding: "10px", textAlign: "center", fontSize: "12px", color: "var(--text-muted)" }}>
-                        Cargando pacientes…
-                      </div>
+                    <table className="lis-table lis-table-dense" aria-label="Elegir paciente">
+                    <thead><tr><th scope="col">Paciente</th><th scope="col">CI</th><th scope="col">Sexo</th><th scope="col">Nacimiento</th><th scope="col">Acción</th></tr></thead>
+                    <tbody>{cargandoPacientes ? (
+                      <tr><td colSpan={5}><CargaLaboratorio compacta mensaje="Cargando pacientes…" /></td></tr>
                     ) : pacientesExistentes.length === 0 ? (
-                      <div style={{ padding: "10px", textAlign: "center", fontSize: "12px", color: "var(--text-muted)" }}>
+                      <tr><td colSpan={5} className="lis-text-muted">
                         {busqueda ? "No se encontraron pacientes" : "No hay pacientes disponibles"}
-                      </div>
+                      </td></tr>
                     ) : (
                       pacientesExistentes.map((p) => (
-                        <div
+                        <tr
                           key={p.id}
                           onClick={() => {
                             setPacienteSeleccionado(p);
                             setBusqueda("");
                           }}
-                          style={{
-                            padding: "6px 10px",
-                            borderBottom: "1px solid var(--border-light)",
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            cursor: "pointer",
-                          }}
                           className="lis-paciente-list-item"
                         >
-                          <div>
+                          <td>
                             <strong style={{ fontSize: "12.5px", display: "block", color: "var(--text-main)" }}>
                               {p.apellido_paterno} {p.apellido_materno || ""}, {p.nombres}
                             </strong>
-                            <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                              {p.sin_ci ? "Sin CI" : `CI: ${p.ci}`} • {p.sexo === "M" ? "Masc" : "Fem"}
-                              {p.fecha_nacimiento ? ` • ${p.fecha_nacimiento}` : ""}
-                            </span>
-                          </div>
+                          </td>
+                          <td>{p.sin_ci ? "Sin CI" : `${p.ci}${p.ci_complemento ? `-${p.ci_complemento}` : ""}`}</td>
+                          <td>{p.sexo}</td>
+                          <td>{p.fecha_nacimiento ? p.fecha_nacimiento.split("-").reverse().join("/") : "—"}</td>
+                          <td>
                           <button
                             type="button"
                             className="lis-btn lis-btn-secondary lis-btn-sm"
+                            aria-label={`Elegir a ${p.nombres} ${p.apellido_paterno}`}
                             style={{ fontSize: "11px", padding: "2px 8px" }}
                           >
                             Elegir
                           </button>
-                        </div>
+                          </td>
+                        </tr>
                       ))
-                    )}
+                    )}</tbody></table>
                   </div>
                 </div>
               ) : (
@@ -902,103 +960,81 @@ export const NuevaOrdenPage: React.FC = () => {
           </div>
 
           <div className="lis-zone-content">
-            {/* Botones de perfil rápido */}
-            <div className="lis-perfiles-bar">
-              <span style={{ fontSize: "12.5px", fontWeight: 700, color: "var(--text-muted)", marginRight: "6px" }}>
-                Perfiles rápidos:
-              </span>
-              {perfilesCatalogo.map((perf) => (
-                <button
-                  key={perf.codigo}
-                  type="button"
-                  onClick={() => handleSeleccionarPerfil(perf.codigo)}
-                  className={`lis-perfil-btn ${perfilActivo === perf.codigo ? "active" : ""}`}
-                >
-                  {perf.nombre}
-                </button>
-              ))}
-              {perfilesRapidos.map((perf) => (
-                <button
-                  key={`RAPIDO-${perf.id}`}
-                  type="button"
-                  onClick={() => handleSeleccionarPerfil(`RAPIDO-${perf.id}`)}
-                  className={`lis-perfil-btn ${perfilActivo === `RAPIDO-${perf.id}` ? "active" : ""}`}
-                  title="Perfil rápido personalizado"
-                >
-                  {perf.nombre}
-                </button>
-              ))}
+            <div className="lis-perfiles-selector">
+              {perfilesCatalogo.length > 0 && <section className="lis-perfiles-selector-group">
+                <h3>Perfiles del laboratorio</h3>
+                <div className="lis-perfiles-bar">
+                  {perfilesCatalogo.map((perf) => (
+                    <button
+                      key={perf.codigo}
+                      type="button"
+                      onClick={() => handleSeleccionarPerfil(perf.codigo)}
+                      className={`lis-perfil-btn ${perfilActivo === perf.codigo ? "active" : ""}`}
+                      title={resumenEstudiosPerfil(perf.estudios, estudiosCatalogo)}
+                      aria-pressed={perfilActivo === perf.codigo}
+                    >
+                      <span>{perf.nombre}</span>
+                      <small>{perf.estudios.map((item) => item.codigo).join(" · ")}</small>
+                    </button>
+                  ))}
+                </div>
+              </section>}
+              {perfilesRapidos.length > 0 && <section className="lis-perfiles-selector-group">
+                <h3>Perfiles rápidos guardados</h3>
+                <ul className="lis-quick-profile-selection-list">
+                  {perfilesRapidos.map((perf) => {
+                    const codigo = `RAPIDO-${perf.id}`;
+                    const seleccionado = perfilActivo === codigo;
+                    return <li key={codigo}>
+                      <button
+                        type="button"
+                        onClick={() => handleSeleccionarPerfil(codigo)}
+                        className={`lis-quick-profile-select-btn ${seleccionado ? "active" : ""}`}
+                        title={resumenEstudiosPerfil(perf.estudios, estudiosCatalogo)}
+                        aria-pressed={seleccionado}
+                      >
+                        <span className="lis-quick-profile-select-info">
+                          <strong>{perf.nombre}</strong>
+                          <small>{perf.estudios.length} {perf.estudios.length === 1 ? "estudio" : "estudios"} · {resumenEstudiosPerfil(perf.estudios, estudiosCatalogo)}</small>
+                        </span>
+                        {seleccionado && <span className="lis-quick-profile-select-check" aria-label="Seleccionado">✓</span>}
+                      </button>
+                    </li>;
+                  })}
+                </ul>
+              </section>}
             </div>
 
-            {/* Cuadrícula de 9 interruptores amplios */}
+            {/* Estudios con ampliación al pasar el cursor o enfocar por teclado. */}
             {cargandoCatalogo ? (
-              <p className="lis-text-muted" style={{ fontSize: "13px" }}>
-                Cargando catálogo…
-              </p>
+              <CargaLaboratorio mensaje="Cargando catálogo…" />
             ) : (
               <div className="lis-estudios-switches-grid">
-                {estudiosCatalogo.map((est) => {
+                {estudiosParaSeleccion.map((est) => {
                   const seleccionado = estudiosSeleccionados.has(est.codigo);
                   return (
                     <React.Fragment key={est.codigo}>
-                      <div
+                      <button
+                        type="button"
                         className={`lis-estudio-switch-item ${seleccionado ? "selected" : ""}`}
                         onClick={() => handleToggleEstudio(est.codigo)}
                         role="checkbox"
                         aria-checked={seleccionado}
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                          if (e.key === " " || e.key === "Enter") {
-                            e.preventDefault();
-                            handleToggleEstudio(est.codigo);
-                          }
-                        }}
                       >
-                        <div className="lis-switch-header">
+                        <span className="lis-switch-header">
                           <span className="lis-switch-code">{est.codigo}</span>
-                          <input
-                            type="checkbox"
-                            checked={seleccionado}
-                            onChange={() => {}}
-                            tabIndex={-1}
-                            style={{ cursor: "pointer" }}
-                          />
-                        </div>
+                          <span className="lis-switch-check" aria-hidden="true">{seleccionado ? "✓" : ""}</span>
+                        </span>
                         <span className="lis-switch-name">{est.nombre}</span>
-                      </div>
+                      </button>
 
                       {/* Inmunoserología desplegada en línea */}
                       {est.codigo === "INMUNOSEROLOGIA" && seleccionado && est.grupos && (
                         <div className="lis-inmunosero-dropdown">
-                          <span style={{ fontSize: "12.5px", fontWeight: 700, color: "#701a75" }}>
+                          <span style={{ fontSize: "12.5px", fontWeight: 700, color: "var(--sero-accent)" }}>
                             Grupos de Inmunoserología:
                           </span>
-                          <div className="lis-inmunosero-grid">
-                            {est.grupos.map((g) => {
-                              const marcado = gruposInmunosero.has(g.codigo);
-                              const etiquetaHumanizada = g.codigo.replace(/_/g, " ");
-                              const paramsTexto = g.parametros.map((p) => p.nombre).join(", ");
-                              return (
-                                <label
-                                  key={g.codigo}
-                                  className={`lis-inmunosero-item ${marcado ? "selected" : ""}`}
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                                    <input
-                                      type="checkbox"
-                                      checked={marcado}
-                                      onChange={() => handleToggleGrupoInmunosero(g.codigo)}
-                                    />
-                                    <strong>{etiquetaHumanizada}</strong>
-                                  </div>
-                                  <span style={{ fontSize: "11px", color: "var(--text-muted)", paddingLeft: "20px" }}>
-                                    {paramsTexto}
-                                  </span>
-                                </label>
-                              );
-                            })}
-                          </div>
+                          <SeleccionSubestudios grupos={est.grupos} seleccionados={gruposInmunosero} onToggle={handleToggleGrupoInmunosero} />
                         </div>
                       )}
                     </React.Fragment>
@@ -1273,6 +1309,7 @@ export const NuevaOrdenPage: React.FC = () => {
             </div>
 
             <div className="lis-modal-footer">
+              {guardando && <CargaLaboratorio compacta mensaje="Creando orden…" />}
               <button
                 type="button"
                 className="lis-btn lis-btn-secondary"

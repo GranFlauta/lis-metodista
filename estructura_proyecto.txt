@@ -1,0 +1,286 @@
+[01;34m.[0m
+├── [01;34mbackend[0m
+│   ├── [01;34malembic[0m
+│   │   ├── [01;34mversions[0m
+│   │   │   ├── 0001_baseline.py
+│   │   │   ├── 0002_config_sesion.py
+│   │   │   ├── 0003_overrides_obs_visitante.py
+│   │   │   ├── 0004_perfiles_rapidos.py
+│   │   │   ├── 0005_troponinas_inmunoserologia.py
+│   │   │   ├── 0006_etiqueta_cayados.py
+│   │   │   ├── 0007_captura_serologia_ego.py
+│   │   │   ├── 0008_catalogo_y_campos_utilizados.py
+│   │   │   ├── 0009_presentacion_perfil_pancreatico.py
+│   │   │   ├── 0010_curva_y_parasitologia.py
+│   │   │   ├── 0011_nombre_curva_tolerancia.py
+│   │   │   ├── 0012_moco_fecal_texto_libre.py
+│   │   │   ├── 0013_coproparasitologicos.py
+│   │   │   ├── 0014_titulos_perfil_pancreatico.py
+│   │   │   ├── 0015_ldh_quimica_perfil_cardiaco.py
+│   │   │   ├── 0016_parasitologia_en_inmunoserologia.py
+│   │   │   ├── 0017_orden_ldl_vldl_perfil_lipidico.py
+│   │   │   ├── 0018_ego_quimica_opciones.py
+│   │   │   ├── 0019_serologia_muestra_metodo.py
+│   │   │   ├── 0020_inmunoserologia_chagas_asto.py
+│   │   │   ├── 0021_unidades_coagulacion.py
+│   │   │   └── 0022_referencias_hepatograma.py
+│   │   ├── env.py
+│   │   └── script.py.mako
+│   ├── [01;34mapp[0m
+│   │   ├── [01;34mapi[0m
+│   │   │   ├── auth.py
+│   │   │   ├── catalogo.py
+│   │   │   ├── deps.py
+│   │   │   ├── estadisticas.py
+│   │   │   ├── informes.py
+│   │   │   ├── __init__.py
+│   │   │   ├── ordenes.py
+│   │   │   ├── pacientes.py
+│   │   │   ├── resultados.py
+│   │   │   └── usuarios.py
+│   │   ├── [01;34mcalculation[0m
+│   │   │   ├── engine.py
+│   │   │   └── __init__.py
+│   │   ├── [01;34mcatalog[0m
+│   │   │   ├── definitions.py
+│   │   │   └── __init__.py
+│   │   ├── [01;34mcore[0m
+│   │   │   ├── clock.py
+│   │   │   ├── config.py
+│   │   │   ├── database.py
+│   │   │   ├── errors.py
+│   │   │   ├── __init__.py
+│   │   │   └── security.py
+│   │   ├── [01;34mmodels[0m
+│   │   │   ├── catalog.py
+│   │   │   ├── __init__.py
+│   │   │   ├── order.py
+│   │   │   ├── patient.py
+│   │   │   ├── report.py
+│   │   │   ├── result.py
+│   │   │   ├── session.py
+│   │   │   └── user.py
+│   │   ├── [01;34mreports[0m
+│   │   │   ├── [01;34massets[0m
+│   │   │   │   ├── [01;35mlogo-labmet.png[0m
+│   │   │   │   ├── [01;35mlogo-metodista.svg[0m
+│   │   │   │   ├── [01;35mmarca-agua-institucional.svg[0m
+│   │   │   │   ├── [01;35mmarca-agua-no-aprobado.svg[0m
+│   │   │   │   ├── [01;35mmembrete-inferior.svg[0m
+│   │   │   │   └── [01;35mmembrete-superior.svg[0m
+│   │   │   ├── [01;34mtemplates[0m
+│   │   │   │   └── informe.html
+│   │   │   ├── curva.py
+│   │   │   ├── __init__.py
+│   │   │   ├── pdf.py
+│   │   │   └── presentation.py
+│   │   ├── [01;34mschemas[0m
+│   │   │   ├── auth.py
+│   │   │   ├── catalogo.py
+│   │   │   ├── estadistica.py
+│   │   │   ├── informe.py
+│   │   │   ├── __init__.py
+│   │   │   ├── orden.py
+│   │   │   ├── paciente.py
+│   │   │   ├── resultado.py
+│   │   │   └── usuario.py
+│   │   ├── [01;34mservices[0m
+│   │   │   ├── coagulacion_service.py
+│   │   │   ├── coproparasitologia_service.py
+│   │   │   ├── curva_service.py
+│   │   │   ├── evaluacion_service.py
+│   │   │   ├── grupo_sanguineo_service.py
+│   │   │   ├── informes_service.py
+│   │   │   ├── __init__.py
+│   │   │   ├── serologia_service.py
+│   │   │   ├── sesion_config_service.py
+│   │   │   └── session_policy.py
+│   │   ├── cli.py
+│   │   ├── __init__.py
+│   │   └── main.py
+│   ├── [01;34mtests[0m
+│   │   ├── base.py
+│   │   ├── __init__.py
+│   │   ├── test_base.py
+│   │   ├── test_calculo_y_catalogo.py
+│   │   ├── test_catalogo_ampliado.py
+│   │   ├── test_catalogo_api.py
+│   │   ├── test_coagulacion.py
+│   │   ├── test_coproparasitologicos.py
+│   │   ├── test_curva_service.py
+│   │   ├── test_entrada_numerica.py
+│   │   ├── test_estadisticas_api.py
+│   │   ├── test_evaluacion.py
+│   │   ├── test_fase_3_8.py
+│   │   ├── test_fase_4_informes.py
+│   │   ├── test_grupo_sanguineo.py
+│   │   ├── test_hepatograma.py
+│   │   ├── test_login.py
+│   │   ├── test_ordenes.py
+│   │   ├── test_pacientes.py
+│   │   ├── test_parasitologia_moco_fecal.py
+│   │   ├── test_password.py
+│   │   ├── test_pdf_report.py
+│   │   ├── test_resultados_api.py
+│   │   ├── test_serologia.py
+│   │   ├── test_sesion.py
+│   │   └── test_usuarios.py
+│   ├── alembic.ini
+│   ├── Dockerfile
+│   ├── .env.example
+│   ├── requirements-dev.txt
+│   └── requirements.txt
+├── [01;34m.cursor[0m
+│   └── [01;34mrules[0m
+│       └── ux.mdc
+├── [01;34mdb[0m
+│   └── [01;34minit[0m
+│       ├── 001_schema.sql
+│       └── 002_seed_catalogo.sql
+├── [01;34mdocs[0m
+│   ├── [01;34mhistorial[0m
+│   │   ├── EVALUACION_FASE_1.md
+│   │   ├── EVALUACION_FASE_2.md
+│   │   ├── EVALUACION_FASE_3.md
+│   │   ├── EVIDENCIAS.md
+│   │   ├── PROMPT_FASE_1.md
+│   │   ├── PROMPT_FASE_2.md
+│   │   ├── PROMPT_FASE_3.md
+│   │   └── PROMT_FASE_1.5_CERRAR.md
+│   ├── CAMBIOS_HISTOGRAMA_INFORMES_Y_PERFILES_RAPIDOS.md
+│   ├── CONTEXTO_PROYECTO.md
+│   ├── DECISIONES.md
+│   ├── instruccion de diseño paginas.md
+│   ├── SUPUESTOS.md
+│   └── UX_GUIDE.md
+├── [01;34mfrontend[0m
+│   ├── [01;34mpublic[0m
+│   │   └── [01;34mbranding[0m
+│   │       ├── [01;35mlabmet-favicon.svg[0m
+│   │       ├── [01;35mlabmet-loader.svg[0m
+│   │       ├── [01;35mlabmet-login-dark.svg[0m
+│   │       ├── [01;35mlabmet-login-light.svg[0m
+│   │       └── [01;35mlogo-metodista.svg[0m
+│   ├── [01;34msrc[0m
+│   │   ├── [01;34mapi[0m
+│   │   │   ├── auth.ts
+│   │   │   ├── catalogo.ts
+│   │   │   ├── client.ts
+│   │   │   ├── estadisticas.ts
+│   │   │   ├── informes.ts
+│   │   │   ├── ordenes.ts
+│   │   │   ├── pacientes.ts
+│   │   │   ├── resultados.ts
+│   │   │   └── usuarios.ts
+│   │   ├── [01;34massets[0m
+│   │   ├── [01;34mcomponents[0m
+│   │   │   ├── EntradaResultadoNumerico.tsx
+│   │   │   ├── EntradaResultadoTexto.tsx
+│   │   │   ├── EstudiosPerfil.tsx
+│   │   │   ├── Icono.tsx
+│   │   │   ├── Layout.tsx
+│   │   │   ├── MarcaLaboratorio.tsx
+│   │   │   ├── MuestrasSeriadas.tsx
+│   │   │   ├── TemaProvider.tsx
+│   │   │   └── VistaPreviaInforme.tsx
+│   │   ├── [01;34mfeatures[0m
+│   │   │   ├── [01;34madmin[0m
+│   │   │   │   ├── ConfiguracionSesionPage.tsx
+│   │   │   │   ├── .gitkeep
+│   │   │   │   └── UsuariosPage.tsx
+│   │   │   ├── [01;34mauth[0m
+│   │   │   │   ├── AuthProvider.tsx
+│   │   │   │   ├── CambiarPasswordPage.tsx
+│   │   │   │   ├── .gitkeep
+│   │   │   │   ├── LoginPage.tsx
+│   │   │   │   └── RutaProtegida.tsx
+│   │   │   ├── [01;34mcatalogo[0m
+│   │   │   │   └── CatalogoPage.tsx
+│   │   │   ├── [01;34mcolaborativo[0m
+│   │   │   │   └── .gitkeep
+│   │   │   ├── [01;34mestadisticas[0m
+│   │   │   │   ├── EstadisticasPage.tsx
+│   │   │   │   └── GraficosEstadistica.tsx
+│   │   │   ├── [01;34mhistorial[0m
+│   │   │   │   └── .gitkeep
+│   │   │   ├── [01;34mhome[0m
+│   │   │   │   └── HomePage.tsx
+│   │   │   ├── [01;34minformes[0m
+│   │   │   │   ├── InformeDetallePage.tsx
+│   │   │   │   ├── InformesPage.tsx
+│   │   │   │   └── PapeleraPage.tsx
+│   │   │   ├── [01;34mnotificaciones[0m
+│   │   │   │   └── .gitkeep
+│   │   │   ├── [01;34mordenes[0m
+│   │   │   │   ├── CapturaResultadosPage.tsx
+│   │   │   │   ├── catalogoEstudiosPlantillas.ts
+│   │   │   │   ├── CurvaToleranciaCaptura.tsx
+│   │   │   │   ├── .gitkeep
+│   │   │   │   ├── ModalCapturaHelpers.tsx
+│   │   │   │   ├── NuevaOrdenPage.tsx
+│   │   │   │   ├── OrdenDetallePage.tsx
+│   │   │   │   ├── OrdenesPage.tsx
+│   │   │   │   ├── SeccionGrupoSanguineo.tsx
+│   │   │   │   └── SeccionInmunoserologia.tsx
+│   │   │   ├── [01;34mpacientes[0m
+│   │   │   │   ├── .gitkeep
+│   │   │   │   ├── PacienteDetallePage.tsx
+│   │   │   │   ├── PacienteFormModal.tsx
+│   │   │   │   └── PacientesPage.tsx
+│   │   │   ├── [01;34mpapelera[0m
+│   │   │   │   └── .gitkeep
+│   │   │   ├── [01;34mreportes[0m
+│   │   │   │   └── .gitkeep
+│   │   │   └── [01;34mversiones[0m
+│   │   │       └── .gitkeep
+│   │   ├── [01;34mutils[0m
+│   │   │   ├── catalogoParametros.ts
+│   │   │   ├── formatoNumerico.ts
+│   │   │   ├── formatoTexto.ts
+│   │   │   └── ordenesMemoria.ts
+│   │   ├── App.tsx
+│   │   ├── index.css
+│   │   └── main.tsx
+│   ├── [01;34mtests[0m
+│   │   └── formatoNumerico.test.mjs
+│   ├── Caddyfile
+│   ├── Dockerfile
+│   ├── index.html
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── tsconfig.json
+│   ├── tsconfig.tsbuildinfo
+│   └── vite.config.ts
+├── [01;34mRECURSOS[0m
+│   ├── demo.html
+│   ├── [01;35mlabmet-loader.svg[0m
+│   ├── LabmetLoader.tsx
+│   ├── [01;35mlabmet-login-dark.svg[0m
+│   ├── [01;35mlabmet-login-light.svg[0m
+│   └── LabmetLoginLogo.tsx
+├── [01;34mscripts[0m
+│   ├── [01;32mbackup.sh[0m
+│   ├── [01;32mcrear_admin.py[0m
+│   ├── [01;32mcrear_bd_test.sh[0m
+│   ├── [01;32mgenerar_seed_sql.py[0m
+│   └── [01;32mrestaurar.sh[0m
+├── AGENTS.md
+├── AUDITORIA_FASES_1_3.md
+├── CONTROL SESION.md
+├── .cursorignore
+├── docker-compose.override.yml
+├── docker-compose.yml
+├── .env.example
+├── estructura_proyecto.txt
+├── .gitignore
+├── MEJORAR DISEÑO PANTALLAS.md
+├── package-lock.json
+├── PLAN_DE_ACCION_Y_DIAGNOSTICO.md
+├── PROMPT_FASE_3_5_CORRECCIONES.md
+├── PROMPT_FASE_3_6_UX.md
+├── PROPUESTA_FUNCIONES_NUEVAS.md
+├── README.md
+├── REDISENO_FRONTEND.md
+└── REDISEÑO DE ESTUDIOS
+
+48 directories, 236 files

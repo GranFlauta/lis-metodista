@@ -30,6 +30,16 @@ from app.models.order import Orden, OrdenEstudio, OrdenEstudioGrupo
 from app.models.patient import Paciente
 from app.models.result import ResultadoBorrador
 from app.models.user import Usuario
+from app.services.serologia_service import (
+    OPCIONES_CUALITATIVAS, columnas_serologia, configuracion_serologia, normalizar_entrada, presentar_serologia,
+)
+from app.reports.presentation import es_vacio
+from app.services.coproparasitologia_service import configuracion_muestras, normalizar_muestras, presentar_muestras
+from app.services.curva_service import ZONA, construir_curva, rol_parametro_curva, validar_hora
+from app.services.grupo_sanguineo_service import (
+    es_parametro_grupo_sanguineo, leer_entrada_grupo_sanguineo, normalizar_entrada_grupo_sanguineo,
+)
+from app.services.coagulacion_service import normalizar_unidad_coagulacion, unidad_coagulacion_editable
 
 
 def formatear_decimal(val: Decimal | float | int | None) -> str | None:
@@ -41,6 +51,29 @@ def formatear_decimal(val: Decimal | float | int | None) -> str | None:
     if "." in texto:
         texto = texto.rstrip("0").rstrip(".")
     return texto if texto else "0"
+
+
+CODIGOS_EGO_QUIMICO = {
+    "PROTEINAS", "GLUCOSA", "CETONAS", "ESTERASA_LEUCOCITARIA",
+    "NITRITOS", "PIGMENTOS_BILIARES", "UROBILINOGENO", "SANGRE",
+}
+
+
+def _es_seleccion_simple(estudio_codigo: str, parametros: list[dict[str, Any]]) -> bool:
+    return estudio_codigo in {"PARASITOLOGIA", "PERFIL_CARDIACO", "EGO"} and bool(parametros) and all(
+        parametro["tipo_campo"] == "SELECCION"
+        and not parametro.get("unidad")
+        and not (parametro.get("referencia") or {}).get("texto")
+        for parametro in parametros
+    )
+
+
+def _columnas_inmunoserologia(grupo: str, parametros: list[dict[str, Any]]) -> dict[str, bool]:
+    columnas = columnas_serologia(parametros)
+    if grupo == "PARASITOLOGIA":
+        columnas["muestra"] = any(parametro.get("muestra") for parametro in parametros)
+        columnas["metodo"] = any(parametro.get("metodo") for parametro in parametros)
+    return columnas
 
 
 def formatear_valor_parametro(tipo_campo: str, valor_numerico: Decimal | None, valor_texto: str | None, decimales: int = 2) -> str | None:
@@ -319,54 +352,89 @@ def obtener_parametros_alcance_orden(orden: Orden) -> dict[int, list[Parametro]]
     return alcance
 
 
+def normalizar_unidades_override(orden: Orden, unidades: dict[str, Any] | None) -> dict[str, str | None]:
+    if not unidades:
+        return {}
+    alcance = obtener_parametros_alcance_orden(orden)
+    permitidos = {
+        p.codigo
+        for oe in orden.estudios
+        for p in alcance[oe.id_orden_estudio]
+        if unidad_coagulacion_editable(oe.estudio.codigo, p)
+    }
+    salida = {}
+    for codigo, unidad in (unidades or {}).items():
+        if codigo not in permitidos:
+            raise ValidacionError(f"No se permite editar la unidad de '{codigo}' en esta orden.")
+        salida[codigo] = normalizar_unidad_coagulacion(unidad)
+    return salida
+
+
+def texto_sin_limite(parametro: Parametro) -> bool:
+    version = parametro.estudio_version
+    captura = (version.configuracion_json or {}).get("captura", {}) if version else {}
+    return parametro.tipo_campo == "TEXTO_LIBRE" and parametro.codigo in captura.get("textos_sin_limite", [])
+
+
 def normalizar_y_validar_valor_entrada(
     parametro: Parametro,
     valor_crudo: Any,
+    valor_anterior: str | None = None,
 ) -> tuple[Decimal | None, str | None]:
     """
     Valida y normaliza el valor según el tipo de campo del parámetro (D3-04).
     Devuelve (valor_numerico, valor_texto).
     """
-    if valor_crudo is None or (isinstance(valor_crudo, str) and valor_crudo.strip() == ""):
+    if es_vacio(valor_crudo):
         return None, None
 
-    tipo = parametro.tipo_campo
+    if es_parametro_grupo_sanguineo(parametro):
+        return None, normalizar_entrada_grupo_sanguineo(parametro, valor_crudo)
+
+    config_muestras = configuracion_muestras(parametro)
+    if config_muestras:
+        return None, normalizar_muestras(valor_crudo, config_muestras, valor_anterior)
+
+    tipo = "SELECCION" if parametro.codigo in OPCIONES_CUALITATIVAS else parametro.tipo_campo
+    config_serologia = configuracion_serologia(parametro)
+    if config_serologia:
+        entrada_serologia = normalizar_entrada(valor_crudo, config_serologia)
+        if entrada_serologia is not None:
+            return None, entrada_serologia
     val_str = str(valor_crudo).strip()
+    if rol_parametro_curva(parametro) == "hora":
+        return None, validar_hora(val_str)
 
     if tipo == "NUMERICO":
-        if parametro.decimales == 0:
-            # En parámetros enteros (ej. PLAQUETAS, recuentos enteros en miles),
-            # los puntos o espacios se usan habitualmente como separadores de miles (ej. 150.000, 123.456).
-            texto_limpio = val_str.replace(" ", "").replace(".", "").replace(",", "")
-            try:
-                d = Decimal(texto_limpio)
-            except InvalidOperation:
-                raise ValidacionError(f"Valor numérico inválido para {parametro.codigo}: {val_str}")
-            if d < 0:
-                raise ValidacionError(f"El valor de {parametro.codigo} no puede ser negativo.")
-            return d, None
-
+        # La API recibe valores sin agrupación de miles. `decimales` define la
+        # precisión de los calculados, no autoriza a borrar el decimal capturado.
         texto_punto = val_str.replace(",", ".")
         try:
             d = Decimal(texto_punto)
         except InvalidOperation:
             raise ValidacionError(f"Valor numérico inválido para {parametro.codigo}: {val_str}")
+        if not d.is_finite():
+            raise ValidacionError(f"Valor numérico inválido para {parametro.codigo}.")
         if d < 0:
             raise ValidacionError(f"El valor de {parametro.codigo} no puede ser negativo.")
-        if "." in texto_punto:
-            decimales_ingresados = len(texto_punto.split(".")[1])
-            if decimales_ingresados > 6:
-                raise ValidacionError(f"El valor de {parametro.codigo} no puede tener más de 6 decimales.")
+        if d.as_tuple().exponent < -6:
+            raise ValidacionError(f"El valor de {parametro.codigo} no puede tener más de 6 decimales.")
         return d, None
 
     elif tipo == "SELECCION":
-        opciones = parametro.opciones or []
+        if parametro.codigo in CODIGOS_EGO_QUIMICO:
+            if len(val_str) > 500:
+                raise ValidacionError(f"El texto para {parametro.codigo} no puede exceder 500 caracteres.")
+            return None, val_str
+        opciones = OPCIONES_CUALITATIVAS.get(parametro.codigo, parametro.opciones) or []
+        if "Negativo" in opciones and "Positivo" in opciones:
+            val_str = {"No reactivo": "Negativo", "Reactivo": "Positivo"}.get(val_str, val_str)
         if val_str not in opciones:
             raise ValidacionError(f"El valor '{val_str}' no es una opción permitida para {parametro.codigo}.")
         return None, val_str
 
     elif tipo == "TEXTO_LIBRE":
-        if len(val_str) > 500:
+        if not texto_sin_limite(parametro) and len(val_str) > 500:
             raise ValidacionError(f"El texto para {parametro.codigo} no puede exceder 500 caracteres.")
         return None, val_str
 
@@ -396,6 +464,7 @@ def evaluar_captura_orden(
     orden: Orden,
     valores_simulados: dict[str, Any] | None = None,
     overrides_simulados: dict[str, Any] | None = None,
+    unidades_simuladas: dict[str, str | None] | None = None,
 ) -> dict[str, Any]:
     """
     Construye la forma común de respuesta ("captura") según §8.1.
@@ -407,6 +476,7 @@ def evaluar_captura_orden(
 
     # Alcance de parámetros por estudio
     alcance_por_oe = obtener_parametros_alcance_orden(orden)
+    unidades = normalizar_unidades_override(orden, unidades_simuladas)
 
     session = Session.object_session(orden)
     if session:
@@ -419,6 +489,7 @@ def evaluar_captura_orden(
     else:
         filas_db = [rb for oe in orden.estudios for rb in oe.resultados if rb.id_edicion is None]
 
+    unidades_por_param_id = {rb.id_parametro: rb.unidad_override for rb in filas_db if rb.unidad_override is not None}
     overrides_por_param_id: dict[int, dict[str, Any]] = {}
     for rb in filas_db:
         if getattr(rb, "ref_modificada", False):
@@ -455,7 +526,8 @@ def evaluar_captura_orden(
                 if cod in params_map and params_map[cod].tipo_campo != "CALCULADO":
                     p = params_map[cod]
                     if val is not None and str(val).strip() != "":
-                        v_num, v_txt = normalizar_y_validar_valor_entrada(p, val)
+                        previo = mapa_valores[oe.id_orden_estudio].get(cod, {}).get("valor_texto")
+                        v_num, v_txt = normalizar_y_validar_valor_entrada(p, val, valor_anterior=previo)
                         mapa_valores[oe.id_orden_estudio][cod] = {
                             "valor_numerico": v_num,
                             "valor_texto": v_txt,
@@ -473,6 +545,7 @@ def evaluar_captura_orden(
     pendientes_totales: list[str] = []
     sin_confirmar_totales: list[str] = []
     errores_totales: list[str] = []
+    hay_resultados_utilizados = False
 
     for oe in orden.estudios:
         est = oe.estudio
@@ -521,6 +594,26 @@ def evaluar_captura_orden(
                 valores_numericos_estudio[p.codigo] = st.get("valor_numerico") if st else None
 
         validaciones_estudio = evaluar_reglas_cruzadas(reglas, valores_numericos_estudio, params_por_cod)
+        sumas = []
+        for regla in reglas:
+            if regla.get("tipo") != "SUMA_IGUAL":
+                continue
+            codigos_suma = regla.get("parametros", [])
+            valores_suma = [valores_numericos_estudio[c] for c in codigos_suma if valores_numericos_estudio.get(c) is not None]
+            total = sum(valores_suma, Decimal("0")) if valores_suma else None
+            esperado = Decimal(str(regla.get("valor", 100)))
+            tolerancia = Decimal(str(regla.get("tolerancia", 0)))
+            entradas_completas = all(
+                valores_numericos_estudio.get(c) is not None
+                for c in codigos_suma if params_por_cod.get(c) and params_por_cod[c].obligatorio
+            )
+            sumas.append({
+                "parametros": codigos_suma,
+                "valor": formatear_decimal(total),
+                "esperado": formatear_decimal(esperado),
+                "tolerancia": formatear_decimal(tolerancia),
+                "valida": total is not None and entradas_completas and abs(total - esperado) <= tolerancia,
+            })
         for val_err in validaciones_estudio:
             if val_err["severidad"] == "ERROR":
                 errores_totales.append(val_err["mensaje"])
@@ -540,6 +633,7 @@ def evaluar_captura_orden(
             es_calculado = (p.tipo_campo == "CALCULADO")
             calculable = True
             motivo_no_calc: str | None = None
+            codigo_motivo_no_calc: str | None = None
             confirmado = True
             es_defecto = False
             v_num: Decimal | None = None
@@ -555,6 +649,7 @@ def evaluar_captura_orden(
                     valor_final_str = None
                     calculable = False
                     codigo_mot = r_c.codigo_motivo if r_c else "FALTA_ENTRADA"
+                    codigo_motivo_no_calc = codigo_mot
                     mot_raw = r_c.motivo if r_c else None
                     motivo_no_calc = motivo_no_calculable_en_espanol(p.codigo, codigo_mot, mot_raw)
             else:
@@ -564,16 +659,6 @@ def evaluar_captura_orden(
                     valor_final_str = formatear_valor_parametro(p.tipo_campo, v_num, st.get("valor_texto"), p.decimales)
                     confirmado = st.get("confirmado", True)
                     es_defecto = st.get("es_defecto", False)
-                elif p.valor_defecto is not None:
-                    # Valor por defecto virtual (D3-05)
-                    valor_final_str = p.valor_defecto
-                    es_defecto = True
-                    confirmado = False
-                    if p.tipo_campo == "NUMERICO":
-                        try:
-                            v_num = a_decimal(p.valor_defecto)
-                        except ValueError:
-                            v_num = None
                 else:
                     valor_final_str = None
                     confirmado = True
@@ -599,26 +684,47 @@ def evaluar_captura_orden(
             elif p.id_parametro in overrides_por_param_id:
                 override_param = overrides_por_param_id[p.id_parametro]
 
+            unidad_final = p.unidad_medida
+            unidad_editable = unidad_coagulacion_editable(est.codigo, p)
+            unidad_modificada = False
+            if unidad_editable:
+                unidad_override = unidades[p.codigo] if p.codigo in unidades else unidades_por_param_id.get(p.id_parametro)
+                unidad_modificada = unidad_override is not None
+                if unidad_modificada:
+                    unidad_final = unidad_override or None
+            es_grupo_sanguineo = est.codigo == "COAGULOGRAMA" and es_parametro_grupo_sanguineo(p)
+            if es_grupo_sanguineo:
+                entrada_grupo = leer_entrada_grupo_sanguineo(valor_final_str)
+                valor_final_str = entrada_grupo.valor or None
+                unidad_final = None
+
             ref_dict, bandera = evaluar_rango_y_bandera(
                 p, v_num, paciente.sexo if paciente else None, edad_meses_total, override=override_param
             )
+            config_serologia = configuracion_serologia(p) if est.codigo == "INMUNOSEROLOGIA" else None
+            serologia = presentar_serologia(valor_final_str, config_serologia, (ref_dict or {}).get("texto")) if config_serologia else None
+            config_muestras = configuracion_muestras(p)
+            muestras_seriadas = presentar_muestras(valor_final_str, config_muestras) if config_muestras else None
+            if est.codigo == "INMUNOSEROLOGIA":
+                bandera = None
+            utilizado = bool(serologia["entrada"]["reactividad"]) if serologia else not es_vacio(valor_final_str)
+            if muestras_seriadas:
+                utilizado = muestras_seriadas["utilizado"]
+                if muestras_seriadas["pendientes"]:
+                    pendientes_totales.append(p.codigo)
+                    for numero in muestras_seriadas["pendientes"]:
+                        mensaje = f"Muestra {numero}: completa la fecha y confirma o escribe el resultado."
+                        validaciones_estudio.append({"severidad": "ERROR", "mensaje": mensaje, "parametros": [p.codigo]})
+                        errores_totales.append(mensaje)
+            if not es_calculado and utilizado and confirmado:
+                hay_resultados_utilizados = True
+            if serologia and utilizado and not serologia["completo"]:
+                pendientes_totales.append(p.codigo)
 
-            # Evaluación de completitud para este parámetro
-            if p.obligatorio:
-                if es_calculado:
-                    r_c = resultados_calc.get(p.codigo)
-                    if r_c and not r_c.calculable:
-                        if r_c.codigo_motivo == "FALTA_ENTRADA":
-                            pendientes_totales.append(p.codigo)
-                        # Si es REGLA_INVALIDA o DIVISION_POR_CERO, NO bloquea COMPLETO (D3-06)
-                else:
-                    if valor_final_str is None or valor_final_str == "":
-                        pendientes_totales.append(p.codigo)
-                    elif not confirmado and es_defecto:
-                        sin_confirmar_totales.append(p.codigo)
-            else:
-                if not confirmado and es_defecto:
-                    sin_confirmar_totales.append(p.codigo)
+            # La selección por campos utilizados también aplica a borradores de catálogo anterior.
+            # Un campo vacío no se vuelve obligatorio ni se convierte en un defecto virtual.
+            if utilizado and not confirmado and (es_defecto or p.requiere_confirmacion):
+                sin_confirmar_totales.append(p.codigo)
 
             param_dict = {
                 "codigo": p.codigo,
@@ -627,27 +733,66 @@ def evaluar_captura_orden(
                     else f"{oe.etiqueta_cayados} (abs.)" if p.codigo == "CAYADOS_ABS" and oe.etiqueta_cayados
                     else p.nombre
                 ),
-                "tipo_campo": p.tipo_campo,
-                "unidad": p.unidad_medida,
+                "tipo_campo": "SELECCION" if p.codigo in OPCIONES_CUALITATIVAS else p.tipo_campo,
+                "texto_sin_limite": texto_sin_limite(p),
+                "unidad": unidad_final,
                 "decimales": p.decimales,
-                "opciones": p.opciones,
-                "obligatorio": p.obligatorio,
+                "opciones": OPCIONES_CUALITATIVAS.get(p.codigo, p.opciones),
+                "obligatorio": False,
                 "requiere_confirmacion": p.requiere_confirmacion,
                 "metodo": p.metodo,
                 "muestra": p.muestra,
-                "valor": valor_final_str,
+                "valor": {"No reactivo": "Negativo", "Reactivo": "Positivo"}.get(valor_final_str, valor_final_str)
+                         if p.codigo in OPCIONES_CUALITATIVAS and "Negativo" in OPCIONES_CUALITATIVAS[p.codigo] else valor_final_str,
                 "es_calculado": es_calculado,
                 "calculable": calculable,
                 "motivo_no_calculable": motivo_no_calc,
+                "codigo_motivo_no_calculable": codigo_motivo_no_calc,
                 "confirmado": confirmado,
                 "es_defecto": es_defecto,
                 "valor_defecto": p.valor_defecto,
                 "referencia": ref_dict,
                 "bandera": bandera,
+                "captura_serologia": config_serologia,
+                "serologia": serologia,
+                "captura_muestras": config_muestras,
+                "muestras_seriadas": muestras_seriadas,
             }
+            if unidad_editable:
+                param_dict.update(unidad_editable=True, unidad_modificada=unidad_modificada)
             secciones_map[grp].append(param_dict)
 
-        secciones = [{"grupo": grp, "parametros": secciones_map[grp]} for grp in grupos_orden]
+        listas_texto = (ev.configuracion_json or {}).get("captura", {}).get("listas_texto", [])
+        secciones = [{"grupo": grp, "parametros": secciones_map[grp],
+                      "formato": ("MUESTRAS_SERIADAS" if any(p["captura_muestras"] for p in secciones_map[grp])
+                                  else "LISTA_TEXTO" if grp in listas_texto
+                                  else "SELECCION_SIMPLE" if _es_seleccion_simple(est.codigo, secciones_map[grp])
+                                  else None),
+                      "columnas": _columnas_inmunoserologia(grp, secciones_map[grp]) if est.codigo == "INMUNOSEROLOGIA" else None}
+                     for grp in grupos_orden]
+        if est.codigo == "COAGULOGRAMA":
+            for seccion in secciones:
+                if seccion["grupo"] == "GRUPO_SANGUINEO":
+                    seccion["columnas"] = {
+                        "unidad": False,
+                        "referencia": False,
+                        "bandera": False,
+                    }
+
+        curva = None
+        config_curva = (ev.configuracion_json or {}).get("captura", {}).get("curva_tolerancia")
+        if config_curva:
+            inicio = orden.fecha_hora_toma_muestra or orden.creado_en
+            fecha_estudio = inicio.astimezone(ZONA).date() if inicio else None
+            valores_curva = {p["codigo"]: p["valor"] for seccion in secciones for p in seccion["parametros"]}
+            curva = construir_curva(config_curva, valores_curva, fecha_estudio)
+            for fila in curva["filas"]:
+                if fila["error"]:
+                    mensaje = f"{fila['etiqueta']}: {fila['error']}"
+                    pendientes_totales.append(fila["hora"] if not fila["hora_valor"] else fila["glucosa"])
+                    validaciones_estudio.append({"severidad": "ERROR", "mensaje": mensaje,
+                                                "parametros": [fila["hora"], fila["glucosa"], fila["fecha"]]})
+                    errores_totales.append(mensaje)
 
         grupos_sel = [g.grupo for g in oe.grupos] if est.seleccion_parcial else None
         estudios_resp.append({
@@ -660,9 +805,12 @@ def evaluar_captura_orden(
             "grupos_seleccionados": grupos_sel,
             "secciones": secciones,
             "validaciones": validaciones_estudio,
+            "sumas": sumas,
+            "curva_tolerancia": curva,
         })
 
-    es_completo = (len(pendientes_totales) == 0 and len(sin_confirmar_totales) == 0 and len(errores_totales) == 0)
+    es_completo = (len(pendientes_totales) == 0 and len(sin_confirmar_totales) == 0 and len(errores_totales) == 0
+                   and hay_resultados_utilizados)
 
     return {
         "orden": {
@@ -693,6 +841,7 @@ def guardar_resultados_orden(
     observaciones_estudios: dict[str, str | None] | None = None,
     observaciones_orden: str | None = None,
     etiquetas_estudios: dict[str, str | None] | None = None,
+    unidades_override: dict[str, str | None] | None = None,
 ) -> dict[str, Any]:
     """
     Persiste los cambios parciales en `resultados_borrador`, recalcula todos los CALCULADO
@@ -704,6 +853,7 @@ def guardar_resultados_orden(
 
     if len(valores_cambios) > 200:
         raise ValidacionError("Máximo 200 claves por petición.")
+    unidades = normalizar_unidades_override(orden, unidades_override)
 
     # Guardar observaciones de la orden si se enviaron
     if observaciones_orden is not None:
@@ -742,7 +892,15 @@ def guardar_resultados_orden(
         oe, param = mapa_codigo_alcance[cod]
         if param.tipo_campo == "CALCULADO":
             raise ValidacionError(f"No se permite modificar el parámetro calculado '{cod}'.")
-        v_num, v_txt = normalizar_y_validar_valor_entrada(param, val)
+        previo = None
+        if configuracion_muestras(param):
+            existente = db.query(ResultadoBorrador).filter(
+                ResultadoBorrador.id_orden_estudio == oe.id_orden_estudio,
+                ResultadoBorrador.id_parametro == param.id_parametro,
+                ResultadoBorrador.id_edicion.is_(None),
+            ).first()
+            previo = existente.valor_texto if existente else None
+        v_num, v_txt = normalizar_y_validar_valor_entrada(param, val, valor_anterior=previo)
         cambios_validados[cod] = (oe, param, v_num, v_txt)
 
     now = ahora()
@@ -760,9 +918,9 @@ def guardar_resultados_orden(
         )
 
         if v_num is None and v_txt is None:
-            # null borra la fila a menos que tenga un override de referencia activo
+            # Una unidad o referencia personalizada puede existir sin resultado.
             if rb:
-                if getattr(rb, "ref_modificada", False):
+                if getattr(rb, "ref_modificada", False) or rb.unidad_override is not None:
                     rb.valor_numerico = None
                     rb.valor_texto = None
                     rb.confirmado = False
@@ -824,7 +982,7 @@ def guardar_resultados_orden(
                     rb.actualizado_por = usuario.id_usuario
                     rb.actualizado_en = now
                     # Si no tiene valor y tampoco es calculado, se limpia la fila vacía
-                    if rb.valor_numerico is None and rb.valor_texto is None and not rb.es_calculado:
+                    if rb.valor_numerico is None and rb.valor_texto is None and not rb.es_calculado and rb.unidad_override is None:
                         db.delete(rb)
             else:
                 inf_val = ro_dict.get("limite_inferior")
@@ -861,6 +1019,29 @@ def guardar_resultados_orden(
                     rb.actualizado_por = usuario.id_usuario
                     rb.actualizado_en = now
 
+    db.flush()
+
+    for codigo, unidad in unidades.items():
+        oe, parametro = mapa_codigo_alcance[codigo]
+        rb = db.query(ResultadoBorrador).filter(
+            ResultadoBorrador.id_orden_estudio == oe.id_orden_estudio,
+            ResultadoBorrador.id_parametro == parametro.id_parametro,
+            ResultadoBorrador.id_edicion.is_(None),
+        ).first()
+        if rb is None:
+            if unidad is None:
+                continue
+            rb = ResultadoBorrador(
+                id_orden_estudio=oe.id_orden_estudio, id_parametro=parametro.id_parametro,
+                es_calculado=False, calculable=True, confirmado=False,
+                actualizado_por=usuario.id_usuario, actualizado_en=now,
+            )
+            db.add(rb)
+        rb.unidad_override = unidad
+        rb.actualizado_por = usuario.id_usuario
+        rb.actualizado_en = now
+        if unidad is None and rb.valor_numerico is None and rb.valor_texto is None and not rb.ref_modificada:
+            db.delete(rb)
     db.flush()
 
     # 3. Recalcular todos los CALCULADO del alcance de cada estudio (D3-08)

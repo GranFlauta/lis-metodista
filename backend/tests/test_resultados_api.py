@@ -88,9 +88,148 @@ class TestResultadosAPI(IntegrationTestCase):
         self.assertEqual(r.status_code, 201, r.text)
         return r.json()["orden"]["id"]
 
+    def test_curva_tolerancia_acepta_parciales_persiste_y_conserva_intervalos(self) -> None:
+        id_orden = self.crear_orden_test(["CURVA_TOLERANCIA"])
+        parcial = self.client.put(
+            f"/api/ordenes/{id_orden}/resultados",
+            headers=self.bio_headers,
+            json={"valores": {"CURVA_BASAL_HORA": "08:00"}},
+        )
+        self.assertEqual(parcial.status_code, 200, parcial.text)
+        recargada = self.client.get(f"/api/ordenes/{id_orden}/captura", headers=self.bio_headers)
+        self.assertEqual(recargada.status_code, 200, recargada.text)
+        filas_parciales = recargada.json()["estudios"][0]["curva_tolerancia"]["filas"]
+        self.assertEqual(filas_parciales[0]["hora_valor"], "08:00")
+        self.assertIsNone(filas_parciales[0]["glucosa_valor"])
+
+        valores = {
+            "CURVA_BASAL_HORA": "08:00", "CURVA_BASAL_GLUCOSA": "90",
+            "CURVA_PRIMERA_HORA": "08:35", "CURVA_PRIMERA_GLUCOSA": "142",
+            "CURVA_SEGUNDA_HORA": "09:20", "CURVA_SEGUNDA_GLUCOSA": "118",
+            "CURVA_CUARTA_HORA": "10:05", "CURVA_CUARTA_GLUCOSA": "96",
+        }
+        guardada = self.client.put(
+            f"/api/ordenes/{id_orden}/resultados",
+            headers=self.bio_headers,
+            json={"valores": valores},
+        )
+        self.assertEqual(guardada.status_code, 200, guardada.text)
+        filas = guardada.json()["estudios"][0]["curva_tolerancia"]["filas"]
+        self.assertEqual(sum(fila["instante"] is not None for fila in filas), 4)
+        self.assertIsNone(filas[3]["instante"])
+        self.assertEqual(filas[1]["minutos_desde_basal"], "35")
+        self.assertEqual(filas[2]["minutos_desde_basal"], "80")
+        self.assertEqual(filas[4]["minutos_desde_basal"], "125")
+
+        recargada = self.client.get(f"/api/ordenes/{id_orden}/captura", headers=self.bio_headers)
+        self.assertEqual(recargada.status_code, 200, recargada.text)
+        valores_recargados = {
+            p["codigo"]: p["valor"]
+            for seccion in recargada.json()["estudios"][0]["secciones"]
+            for p in seccion["parametros"]
+        }
+        self.assertEqual(valores_recargados["CURVA_PRIMERA_GLUCOSA"], "142")
+
     # -------------------------------------------------------------------------
     # Test 1: GET captura de orden con HEMOGRAMA (estructura y sexo)
     # -------------------------------------------------------------------------
+    def test_serologia_captura_columnas_vdrl_y_orden_ego(self) -> None:
+        from tests.test_serologia import entrada
+
+        id_orden = self.crear_orden_test(["EGO", "INMUNOSEROLOGIA"], grupos_inmuno=["WIDAL", "VDRL", "PCR_SEMICUANT", "PCR_TURBIDIMETRICA", "FACTOR_REUMATOIDEO", "ASTO", "VIH"])
+        valores = {"PCR_DILUCION": entrada(reactivo="TECO"), "FR_DILUCION": entrada(dilucion="1/32"),
+                   "ASTO_DILUCION": entrada(dilucion="1/4"), "VDRL_DILUCION": "Positivo", "PCR_CUANTITATIVA": "25.2",
+                   "WIDAL_TIFOIDEA_H": entrada(dilucion="1/130")}
+        respuesta = self.client.put(f"/api/ordenes/{id_orden}/resultados", headers=self.bio_headers, json={"valores": valores})
+        self.assertEqual(respuesta.status_code, 200, respuesta.text)
+        estudios = {e["codigo"]: e for e in respuesta.json()["estudios"]}
+        micro = next(s for s in estudios["EGO"]["secciones"] if s["grupo"] == "MICROSCOPICO")
+        self.assertEqual([p["codigo"] for p in micro["parametros"]][-4:], ["CRISTALES", "CILINDROS", "BACTERIAS", "OTROS"])
+        inmuno = estudios["INMUNOSEROLOGIA"]
+        parametros = {p["codigo"]: p for s in inmuno["secciones"] for p in s["parametros"]}
+        self.assertTrue(all(p["bandera"] is None for p in parametros.values()))
+        self.assertEqual(parametros["VDRL_DILUCION"]["opciones"], ["Negativo", "Positivo"])
+        self.assertEqual(parametros["PCR_DILUCION"]["serologia"]["resultado"], "6.4")
+        self.assertEqual(parametros["FR_DILUCION"]["serologia"]["resultado"], "256")
+        self.assertEqual(parametros["WIDAL_TIFOIDEA_H"]["serologia"]["resultado"], "Positivo · 1/130")
+        vih = next(s for s in inmuno["secciones"] if s["grupo"] == "VIH")
+        self.assertEqual(vih["columnas"], {"unidad": False, "referencia": False, "bandera": False})
+        reabierta = self.client.get(f"/api/ordenes/{id_orden}/captura", headers=self.bio_headers)
+        self.assertEqual(reabierta.json()["estudios"], respuesta.json()["estudios"])
+        invalido = self.client.put(f"/api/ordenes/{id_orden}/resultados", headers=self.bio_headers, json={"valores": {"VDRL_DILUCION": "1/8"}})
+        self.assertEqual(invalido.status_code, 400)
+
+    def test_serologia_incompleta_no_se_publica_y_se_congela_al_completar(self) -> None:
+        from tests.test_serologia import entrada
+        from app.models.report import Informe
+
+        id_orden = self.crear_orden_test(["INMUNOSEROLOGIA"], grupos_inmuno=["FACTOR_REUMATOIDEO", "PCR_SEMICUANT", "ASTO", "WIDAL", "VDRL"])
+        valores = {"PCR_DILUCION": entrada(reactivo="TECO"), "FR_DILUCION": entrada(dilucion=""),
+                   "ASTO_DILUCION": entrada("Negativo"), "VDRL_DILUCION": "Negativo"}
+        valores.update({c: entrada(dilucion="1/320") for c in ("WIDAL_TIFOIDEA_H", "WIDAL_TIFOIDEA_O", "WIDAL_PARATIFI_A", "WIDAL_PARATIFI_B")})
+        respuesta = self.client.put(f"/api/ordenes/{id_orden}/resultados", headers=self.bio_headers, json={"valores": valores, "observaciones_orden": "Revisión ficticia de serología."})
+        self.assertEqual(respuesta.status_code, 200, respuesta.text)
+        self.assertIn("FR_DILUCION", respuesta.json()["completitud"]["pendientes"])
+        self.assertEqual(self.client.post(f"/api/ordenes/{id_orden}/publicar", headers=self.bio_headers).status_code, 400)
+        completa = self.client.put(f"/api/ordenes/{id_orden}/resultados", headers=self.bio_headers, json={"valores": {"FR_DILUCION": entrada(dilucion="1/4", reactivo="PERSONALIZADO", sensibilidad="10.25", unidad="UI/mL")}})
+        self.assertTrue(completa.json()["completitud"]["completo"], completa.text)
+        publicada = self.client.post(f"/api/ordenes/{id_orden}/publicar", headers=self.bio_headers)
+        self.assertEqual(publicada.status_code, 201, publicada.text)
+        folio = publicada.json()["folio"]
+        self.db.expire_all()
+        informe = self.db.query(Informe).filter_by(folio=folio).one()
+        parametros = {p["codigo"]: p for e in informe.snapshot_json["estudios"] for s in e["secciones"] for p in s["parametros"]}
+        self.assertEqual(parametros["FR_DILUCION"]["serologia"]["resultado"], "41")
+        pdf = self.client.get(f"/api/informes/{folio}/pdf", headers=self.bio_headers)
+        self.assertEqual(pdf.status_code, 200)
+        self.assertTrue(pdf.content.startswith(b"%PDF-"))
+
+    def test_decimales_en_hemograma_y_hepatograma_se_persisten_sin_cambiar_escala(self) -> None:
+        id_orden = self.crear_orden_test(["HEMOGRAMA", "HEPATOGRAMA", "PERFIL_LIPIDICO"])
+        codigos = ("GLOBULOS_BLANCOS", "VES", "PLAQUETAS", "GOT_AST", "GPT_ALT", "FOSFATASA_ALCALINA", "GGT")
+        valores = {codigo: "2.2" for codigo in codigos}
+        valores.update({"COLESTEROL": "150.2", "TRIGLICERIDOS": "100.1", "HDL": "45.5"})
+        respuesta = self.client.put(f"/api/ordenes/{id_orden}/resultados", headers=self.bio_headers, json={"valores": valores})
+        self.assertEqual(respuesta.status_code, 200, respuesta.text)
+        captura = self.client.get(f"/api/ordenes/{id_orden}/captura", headers=self.bio_headers).json()
+        parametros = {p["codigo"]: p for estudio in captura["estudios"] for seccion in estudio["secciones"] for p in seccion["parametros"]}
+        for codigo, valor in valores.items():
+            self.assertEqual(parametros[codigo]["valor"], valor)
+        self.db.expire_all()
+        filas = self.db.query(ResultadoBorrador).join(Parametro).filter(Parametro.codigo.in_(codigos)).all()
+        self.assertEqual(len(filas), len(codigos))
+        self.assertTrue(all(fila.valor_numerico == D("2.2") for fila in filas))
+
+    def test_vista_previa_solo_pantalla_y_permisos_backend(self) -> None:
+        id_orden = self.crear_orden_test(["QUIMICA_SANGUINEA"])
+        ruta = f"/api/ordenes/{id_orden}/vista-previa"
+        respuesta = self.client.post(ruta, headers=self.bio_headers, json={"valores": {"GLICEMIA": "2.2", "CREATININA": ""}})
+        self.assertEqual(respuesta.status_code, 200, respuesta.text[:200])
+        self.assertEqual(respuesta.json()["formato"], "Carta")
+        self.assertTrue(respuesta.json()["paginas"][0]["imagen"].startswith("data:image/png;base64,"))
+        self.assertNotIn("application/pdf", respuesta.headers["content-type"])
+        self.assertIn("no-store", respuesta.headers["cache-control"])
+        self.assertEqual(self.client.post(ruta, headers=self.bio_ajeno_headers, json={"valores": {}}).status_code, 404)
+        self.assertEqual(self.client.post(ruta, json={"valores": {}}).status_code, 401)
+        self.assertEqual(self.client.post(ruta, headers=self.admin_headers, json={"valores": {"GLICEMIA": "10"}}).status_code, 403)
+        lectura_admin = self.client.post(ruta, headers=self.admin_headers, json={"valores": {}})
+        self.assertEqual(lectura_admin.status_code, 200, lectura_admin.text[:200])
+        self.assertEqual(self.client.post(ruta, headers=self.bio_headers, json={"valores": {}, "aprobado": True}).status_code, 400)
+        self.assertIn(self.client.post(f"{ruta}.pdf", headers=self.bio_headers, json={"valores": {}}).status_code, (404, 405))
+        self.db.expire_all()
+        self.assertEqual(self.db.query(ResultadoBorrador).count(), 0)
+
+    def test_suma_diferencial_decimal_viene_del_backend(self) -> None:
+        id_orden = self.crear_orden_test(["HEMOGRAMA"])
+        respuesta = self.client.post(f"/api/ordenes/{id_orden}/calcular", headers=self.bio_headers, json={"valores": {
+            "SEGMENTADOS_PCT": "55.2", "LINFOCITOS_PCT": "40.3", "EOSINOFILOS_PCT": "2.2", "MONOCITOS_PCT": "2.3",
+        }})
+        self.assertEqual(respuesta.status_code, 200, respuesta.text)
+        suma = respuesta.json()["estudios"][0]["sumas"][0]
+        self.assertEqual(suma["valor"], "100")
+        self.assertEqual(suma["tolerancia"], "1")
+        self.assertTrue(suma["valida"])
+
     def test_01_get_captura_estructura_y_referencias_por_sexo(self) -> None:
         """1. GET captura con HEMOGRAMA: secciones/parámetros con tipo, unidad y decimales; referencia según sexo."""
         id_m = self.crear_orden_test(["HEMOGRAMA"], sexo="M")
@@ -139,16 +278,16 @@ class TestResultadosAPI(IntegrationTestCase):
     # Test 3: EGO defectos virtuales sin filas en BD
     # -------------------------------------------------------------------------
     def test_03_ego_defectos_virtuales_sin_filas(self) -> None:
-        """3. EGO: los defectos aparecen como virtuales (es_defecto=true, confirmado=false) y no hay filas en resultados_borrador."""
+        """3. EGO no precarga resultados del catálogo y no crea filas al abrirse."""
         id_orden = self.crear_orden_test(["EGO"])
         r = self.client.get(f"/api/ordenes/{id_orden}/captura", headers=self.bio_headers)
         self.assertEqual(r.status_code, 200)
         data = r.json()
 
         params = {p["codigo"]: p for s in data["estudios"][0]["secciones"] for p in s["parametros"]}
-        self.assertTrue(params["NITRITOS"]["es_defecto"])
-        self.assertFalse(params["NITRITOS"]["confirmado"])
-        self.assertEqual(params["NITRITOS"]["valor"], "Negativo")
+        self.assertFalse(params["NITRITOS"]["es_defecto"])
+        self.assertTrue(params["NITRITOS"]["confirmado"])
+        self.assertIsNone(params["NITRITOS"]["valor"])
 
         # Verificar BD: sin filas
         conteo = self.db.query(ResultadoBorrador).join(OrdenEstudio).filter(OrdenEstudio.id_orden == id_orden).count()
@@ -329,7 +468,7 @@ class TestResultadosAPI(IntegrationTestCase):
     # Test 19: Electrolitos completitud e INCOMPLETO ↔ COMPLETO
     # -------------------------------------------------------------------------
     def test_19_electrolitos_completitud(self) -> None:
-        """19. Orden solo con ELECTROLITOS: al completar los 6 obligatorios pasa a COMPLETO; borrar uno la devuelve a INCOMPLETO."""
+        """19. Orden solo con ELECTROLITOS: al ingresar resultados pasa a COMPLETO; sólo vuelve a INCOMPLETO al borrar todos."""
         id_orden = self.crear_orden_test(["ELECTROLITOS"])
 
         # Estado inicial: INCOMPLETO
@@ -352,11 +491,13 @@ class TestResultadosAPI(IntegrationTestCase):
         self.db.refresh(orden_db)
         self.assertEqual(orden_db.estado_trabajo, "COMPLETO")
 
-        # Borrar uno -> regresa a INCOMPLETO
+        # Borrar uno conserva el resto de resultados utilizados
         r_part = self.client.put(f"/api/ordenes/{id_orden}/resultados", json={"valores": {"SODIO": None}}, headers=self.bio_headers)
         self.assertEqual(r_part.status_code, 200)
-        self.assertFalse(r_part.json()["completitud"]["completo"])
-        self.assertIn("SODIO", r_part.json()["completitud"]["pendientes"])
+        self.assertTrue(r_part.json()["completitud"]["completo"])
+        self.assertNotIn("SODIO", r_part.json()["completitud"]["pendientes"])
+        r_vacia = self.client.put(f"/api/ordenes/{id_orden}/resultados", json={"valores": {c: None for c in todos_electrolitos}}, headers=self.bio_headers)
+        self.assertFalse(r_vacia.json()["completitud"]["completo"])
 
         self.db.refresh(orden_db)
         self.assertEqual(orden_db.estado_trabajo, "INCOMPLETO")
@@ -365,12 +506,12 @@ class TestResultadosAPI(IntegrationTestCase):
     # Test 20: EGO confirmar defectos
     # -------------------------------------------------------------------------
     def test_20_ego_confirmar_defectos(self) -> None:
-        """20. EGO: con defectos sin confirmar → sin_confirmar los lista; confirmar-defectos los persiste con confirmado=TRUE."""
+        """20. EGO: no precarga defectos; la confirmación explícita permite incorporar sus valores."""
         id_orden = self.crear_orden_test(["EGO"])
 
         r_get = self.client.get(f"/api/ordenes/{id_orden}/captura", headers=self.bio_headers)
         sin_conf = r_get.json()["completitud"]["sin_confirmar"]
-        self.assertGreater(len(sin_conf), 0)
+        self.assertEqual(len(sin_conf), 0)
 
         # Confirmar todos los defectos
         r_conf = self.client.post(f"/api/ordenes/{id_orden}/resultados/confirmar-defectos", json={}, headers=self.bio_headers)
@@ -398,10 +539,10 @@ class TestResultadosAPI(IntegrationTestCase):
         orden_db = self.db.query(Orden).filter(Orden.id_orden == id_orden).first()
         self.assertEqual(orden_db.estado_trabajo, "COMPLETO")
 
-        # Quitar HDL -> falta de entrada -> sí bloquea COMPLETO
+        # Quitar HDL omite los derivados pendientes, sin bloquear los resultados utilizados
         r_falta = self.client.put(f"/api/ordenes/{id_orden}/resultados", json={"valores": {"HDL": None}}, headers=self.bio_headers)
-        self.assertFalse(r_falta.json()["completitud"]["completo"])
-        self.assertIn("LDL", r_falta.json()["completitud"]["pendientes"])
+        self.assertTrue(r_falta.json()["completitud"]["completo"])
+        self.assertNotIn("LDL", r_falta.json()["completitud"]["pendientes"])
 
     # -------------------------------------------------------------------------
     # Test 22: Guardar resultados no cambia fila_version

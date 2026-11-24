@@ -8,6 +8,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from "react";
+import { CargaLaboratorio } from "../../components/MarcaLaboratorio";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   actualizarOrdenApi,
@@ -184,8 +185,7 @@ export const OrdenDetallePage: React.FC = () => {
     return (
       <div className="lis-page-container">
         <div className="lis-table-loading">
-          <div className="lis-spinner" style={{ margin: "0 auto 0.5rem" }} />
-          <p>Cargando información de la orden clínica...</p>
+          <CargaLaboratorio mensaje="Cargando información de la orden clínica…" />
         </div>
       </div>
     );
@@ -287,9 +287,9 @@ export const OrdenDetallePage: React.FC = () => {
               <span
                 className="lis-chip"
                 style={{
-                  backgroundColor: "#fef3c7",
-                  color: "#92400e",
-                  borderColor: "#fde68a",
+                  backgroundColor: "var(--warning-bg)",
+                  color: "var(--warning)",
+                  borderColor: "var(--warning)",
                   padding: "0.4rem 0.75rem",
                   fontWeight: 600,
                 }}
@@ -421,8 +421,10 @@ export const OrdenDetallePage: React.FC = () => {
           </div>
         </div>
 
-        <div style={{ padding: "1.25rem 1.5rem" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
+        <div className="lis-table-responsive">
+          <table className="lis-table lis-table-dense" aria-label="Estudios solicitados">
+            <thead><tr><th scope="col">Código</th><th scope="col">Estudio</th><th scope="col">Grupos solicitados</th></tr></thead>
+            <tbody>
             {[
               ...orden.estudios,
               ...obtenerEstudiosAgregados(orden.id)
@@ -433,62 +435,14 @@ export const OrdenDetallePage: React.FC = () => {
                   grupos: null,
                 })),
             ].map((est) => (
-              <div
-                key={est.codigo}
-                style={{
-                  padding: "0.85rem 1rem",
-                  backgroundColor: "#f8fafc",
-                  border: "1px solid var(--border-color)",
-                  borderRadius: "8px",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                  flexWrap: "wrap",
-                  gap: "0.75rem",
-                }}
-              >
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                    <span className="lis-chip lis-chip-primary" style={{ fontWeight: 800 }}>
-                      {est.codigo}
-                    </span>
-                    <strong style={{ fontSize: "0.95rem" }}>{est.nombre}</strong>
-                  </div>
-
-                  {/* Grupos de Inmunoserología seleccionados */}
-                  {est.grupos && est.grupos.length > 0 && (
-                    <div style={{ marginTop: "0.5rem", paddingLeft: "0.25rem" }}>
-                      <span
-                        style={{
-                          fontSize: "0.75rem",
-                          fontWeight: 700,
-                          color: "var(--text-muted)",
-                          display: "block",
-                          marginBottom: "0.25rem",
-                        }}
-                      >
-                        Grupos Solicitados:
-                      </span>
-                      <div className="lis-chips-container">
-                        {est.grupos.map((grp) => (
-                          <span key={grp} className="lis-chip lis-chip-group">
-                            {grp.replace(/_/g, " ")}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <span
-                  className="lis-status-badge lis-status-incompleto"
-                  style={{ fontSize: "0.75rem" }}
-                >
-                  Pendiente de Análisis
-                </span>
-              </div>
+              <tr key={est.codigo}>
+                <td><span className="lis-chip lis-chip-primary">{est.codigo}</span></td>
+                <td className="lis-cell-bold">{est.nombre}</td>
+                <td>{est.grupos?.length ? est.grupos.map((grupo) => grupo.replace(/_/g, " ")).join(" · ") : "Todos los campos"}</td>
+              </tr>
             ))}
-          </div>
+            </tbody>
+          </table>
         </div>
       </div>
 

@@ -7,31 +7,57 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from app.core.clock import ahora, set_simulated_time
+from app.core.config import settings
 from app.models.session import LogSeguridad, Sesion
 from tests.base import IntegrationTestCase
 
 
 class TestCicloVidaSesion(IntegrationTestCase):
-    def test_10_sesion_muere_sin_latido_tras_150_segundos(self) -> None:
-        """10. Sesión muere con SESSION_DEAD_AFTER_SECONDS sin latido (401 SESION_EXPIRADA) y queda revocada."""
+    def setUp(self) -> None:
+        super().setUp()
+        self._politica_previa = (
+            settings.modo_produccion,
+            settings.session_idle_timeout_minutes,
+            settings.session_absolute_timeout_hours,
+            settings.access_token_minutes,
+        )
+        settings.modo_produccion = True
+        settings.session_idle_timeout_minutes = 60
+        settings.session_absolute_timeout_hours = 24
+        settings.access_token_minutes = 10
+
+    def tearDown(self) -> None:
+        (
+            settings.modo_produccion,
+            settings.session_idle_timeout_minutes,
+            settings.session_absolute_timeout_hours,
+            settings.access_token_minutes,
+        ) = self._politica_previa
+        super().tearDown()
+
+    def test_10_sesion_expira_por_60_minutos_sin_actividad(self) -> None:
+        """La sesión vence por inactividad, no por el tiempo desde el último heartbeat."""
+        from app.core.security import create_access_token
+
         self.crear_usuario_test(usuario="medico", password="PasswordSeguro123!")
-        login_resp = self.client.post("/api/auth/login", json={"usuario": "medico", "password": "PasswordSeguro123!"})
-        token = login_resp.json()["access_token"]
+        self.client.post("/api/auth/login", json={"usuario": "medico", "password": "PasswordSeguro123!"})
+        sesion = self.db.query(Sesion).first()
+        token = create_access_token(
+            subject=sesion.id_usuario,
+            session_id=str(sesion.id_sesion),
+            role="ADMIN",
+            expires_delta=timedelta(hours=2),
+        )
         headers = {"Authorization": f"Bearer {token}"}
 
-        # Comprobar llamada normal viva
-        r_inicial = self.client.get("/api/auth/me", headers=headers)
-        self.assertEqual(r_inicial.status_code, 200)
-
-        # Avanzar el reloj 151 segundos (sin latido)
         set_simulated_time(ahora() + timedelta(seconds=151))
+        self.assertEqual(self.client.get("/api/auth/me", headers=headers).status_code, 200)
 
-        # La sesión debe estar muerta
+        set_simulated_time(ahora() + timedelta(minutes=60))
         r_muerta = self.client.get("/api/auth/me", headers=headers)
         self.assertEqual(r_muerta.status_code, 401)
         self.assertEqual(r_muerta.json()["codigo"], "SESION_EXPIRADA")
 
-        # Comprobar que en base de datos quedó revocada y se registró evento SESION_EXPIRADA
         sesion = self.db.query(Sesion).first()
         self.assertIsNotNone(sesion.revocada_en)
 
@@ -39,29 +65,38 @@ class TestCicloVidaSesion(IntegrationTestCase):
         self.assertIsNotNone(evento)
 
     def test_11_con_latidos_pero_sin_actividad_muere_por_idle_timeout(self) -> None:
-        """11. Con latidos pero sin actividad durante IDLE_TIMEOUT_MINUTES → muere (el latido no cuenta como actividad)."""
+        """Los heartbeats automáticos no evitan la expiración tras 60 min sin interacción."""
+        from app.core.security import create_access_token
+
         self.crear_usuario_test(usuario="bioq", password="PasswordSeguro123!")
-        login_resp = self.client.post("/api/auth/login", json={"usuario": "bioq", "password": "PasswordSeguro123!"})
-        token = login_resp.json()["access_token"]
+        self.client.post("/api/auth/login", json={"usuario": "bioq", "password": "PasswordSeguro123!"})
+        sesion = self.db.query(Sesion).first()
+        token = create_access_token(
+            subject=sesion.id_usuario,
+            session_id=str(sesion.id_sesion),
+            role="BIOQUIMICO",
+            expires_delta=timedelta(hours=2),
+        )
         headers = {"Authorization": f"Bearer {token}"}
 
-        # Simular latidos periódicos cada 25 segundos durante 31 minutos
         t0 = ahora()
-        for i in range(1, 75):  # 75 * 25s = 1875s (> 30 min)
+        for i in range(1, 146):
             t_latido = t0 + timedelta(seconds=i * 25)
             set_simulated_time(t_latido)
             r_beat = self.client.post("/api/auth/heartbeat", headers=headers)
-            if t_latido - t0 > timedelta(minutes=30):
-                # Tras 30 min sin actividad, el heartbeat u otra llamada debe fallar
+            if t_latido - t0 >= timedelta(minutes=60):
+                self.assertEqual(r_beat.status_code, 401)
+                self.assertEqual(r_beat.json()["codigo"], "SESION_EXPIRADA")
                 break
+            self.assertEqual(r_beat.status_code, 200)
 
         # Cualquier petición normal debe recibir 401 SESION_EXPIRADA
         r_act = self.client.get("/api/auth/me", headers=headers)
         self.assertEqual(r_act.status_code, 401)
         self.assertEqual(r_act.json()["codigo"], "SESION_EXPIRADA")
 
-    def test_12_peticion_normal_renueva_actividad_pero_latido_no(self) -> None:
-        """12. Una petición normal renueva ultima_actividad; el latido no."""
+    def test_12_solo_la_senal_de_actividad_humana_renueva_inactividad(self) -> None:
+        """Las consultas y heartbeats automáticos no se registran como actividad humana."""
         self.crear_usuario_test(usuario="operador", password="PasswordSeguro123!")
         login_resp = self.client.post("/api/auth/login", json={"usuario": "operador", "password": "PasswordSeguro123!"})
         token = login_resp.json()["access_token"]
@@ -79,27 +114,37 @@ class TestCicloVidaSesion(IntegrationTestCase):
         self.assertEqual(sesion.ultima_actividad, actividad_inicial)
         self.assertGreater(sesion.ultimo_latido, actividad_inicial)
 
-        # Enviar petición normal
         set_simulated_time(ahora() + timedelta(seconds=20))
         r_me = self.client.get("/api/auth/me", headers=headers)
         self.assertEqual(r_me.status_code, 200)
 
         self.db.refresh(sesion)
+        self.assertEqual(sesion.ultima_actividad, actividad_inicial)
+
+        set_simulated_time(ahora() + timedelta(seconds=2))
+        r_activo = self.client.post("/api/auth/heartbeat", json={"actividad": True}, headers=headers)
+        self.assertEqual(r_activo.status_code, 200)
+        self.db.refresh(sesion)
         self.assertGreater(sesion.ultima_actividad, actividad_inicial)
 
-    def test_13_muere_al_superar_tope_absoluto_de_12_horas(self) -> None:
-        """13. Muere al superar ABSOLUTE_SESSION_HOURS aunque haya latidos y actividad."""
+    def test_13_muere_al_superar_tope_absoluto(self) -> None:
+        """El tope absoluto vence la sesión aunque haya actividad continua."""
+        from app.core.security import create_access_token
+
         self.crear_usuario_test(usuario="largo", password="PasswordSeguro123!")
-        login_resp = self.client.post("/api/auth/login", json={"usuario": "largo", "password": "PasswordSeguro123!"})
-        token = login_resp.json()["access_token"]
+        self.client.post("/api/auth/login", json={"usuario": "largo", "password": "PasswordSeguro123!"})
+        sesion = self.db.query(Sesion).first()
+        token = create_access_token(
+            subject=sesion.id_usuario,
+            session_id=str(sesion.id_sesion),
+            role="ADMIN",
+            expires_delta=timedelta(hours=48),
+        )
         headers = {"Authorization": f"Bearer {token}"}
 
-        # Avanzar el reloj a 12 horas y 1 minuto
-        t_futuro = ahora() + timedelta(hours=12, minutes=1)
+        t_futuro = ahora() + timedelta(hours=24, minutes=1)
         set_simulated_time(t_futuro)
 
-        # Actualizar ultimo_latido y ultima_actividad para simular presencia continua
-        sesion = self.db.query(Sesion).first()
         sesion.ultimo_latido = t_futuro
         sesion.ultima_actividad = t_futuro
         self.db.commit()
@@ -128,8 +173,8 @@ class TestCicloVidaSesion(IntegrationTestCase):
         self.assertEqual(r_ok.status_code, 200)
         self.assertIn("access_token", r_ok.json())
 
-        # 3. Avanzar tiempo más allá de sesión muerta (160 s sin latido) -> 401 y borra cookie
-        set_simulated_time(ahora() + timedelta(seconds=160))
+        # 3. Refresh no cuenta como actividad humana; al llegar a 60 min vence y limpia la cookie.
+        set_simulated_time(ahora() + timedelta(minutes=60))
         r_muerta = self.client.post(
             "/api/auth/refresh",
             cookies={"refresh_token": cookie_val},
@@ -258,8 +303,8 @@ class TestCicloVidaSesion(IntegrationTestCase):
     # Tests de Fase 3.5 T5 (Sesión dinámica, latido con actividad, endpoints admin)
     # -------------------------------------------------------------------------
 
-    def test_t5_01_latido_con_actividad_false_no_evita_expiracion_con_true_si(self) -> None:
-        """1. Latido con actividad=false durante 40 min no evita la expiración por inactividad; con actividad=true sí."""
+    def test_t5_01_senal_de_actividad_y_latido_automatico(self) -> None:
+        """Los heartbeats automáticos no cuentan como actividad; una señal real reinicia los 60 min."""
         from datetime import timezone
         from app.core.security import create_access_token
 
@@ -276,11 +321,11 @@ class TestCicloVidaSesion(IntegrationTestCase):
         )
         h_inactivo = {"Authorization": f"Bearer {token_inactivo}"}
 
-        for i in range(1, 85):  # 84 * 25s = 2100s = 35 min (> 30 min)
+        for i in range(1, 146):
             t_i = t0 + timedelta(seconds=i * 25)
             set_simulated_time(t_i)
             r_beat = self.client.post("/api/auth/heartbeat", json={"actividad": False}, headers=h_inactivo)
-            if (t_i - t0) > timedelta(minutes=30):
+            if (t_i - t0) >= timedelta(minutes=60):
                 self.assertEqual(r_beat.status_code, 401)
                 self.assertEqual(r_beat.json()["codigo"], "SESION_EXPIRADA")
                 break
@@ -316,6 +361,59 @@ class TestCicloVidaSesion(IntegrationTestCase):
         r_me_activo = self.client.get("/api/auth/me", headers=h_activo)
         self.assertEqual(r_me_activo.status_code, 200)
 
+    def test_t5_01b_actividad_en_segundo_3599_reinicia_plazo(self) -> None:
+        from app.core.security import create_access_token
+
+        t0 = datetime(2026, 10, 15, 12, 0, 0, tzinfo=timezone.utc)
+        set_simulated_time(t0)
+        usuario = self.crear_usuario_test(usuario="actividad_limite", rol="BIOQUIMICO")
+        self.client.post("/api/auth/login", json={"usuario": "actividad_limite", "password": "ClaveSegura123!"})
+        sesion = self.db.query(Sesion).filter(Sesion.id_usuario == usuario.id_usuario).first()
+        token = create_access_token(
+            subject=usuario.id_usuario,
+            session_id=str(sesion.id_sesion),
+            role="BIOQUIMICO",
+            expires_delta=timedelta(hours=3),
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        set_simulated_time(t0 + timedelta(seconds=3599))
+        actividad = self.client.post("/api/auth/heartbeat", json={"actividad": True}, headers=headers)
+        self.assertEqual(actividad.status_code, 200)
+
+        set_simulated_time(t0 + timedelta(seconds=3599 + 3599))
+        antes_del_limite = self.client.post("/api/auth/heartbeat", json={"actividad": False}, headers=headers)
+        self.assertEqual(antes_del_limite.status_code, 200)
+
+        set_simulated_time(t0 + timedelta(seconds=3599 + 3600))
+        en_el_limite = self.client.post("/api/auth/heartbeat", json={"actividad": False}, headers=headers)
+        self.assertEqual(en_el_limite.status_code, 401)
+        self.assertEqual(en_el_limite.json()["codigo"], "SESION_EXPIRADA")
+
+    def test_t5_01c_sesion_activa_durante_varias_horas(self) -> None:
+        from app.core.security import create_access_token
+
+        t0 = datetime(2026, 10, 16, 8, 0, 0, tzinfo=timezone.utc)
+        set_simulated_time(t0)
+        usuario = self.crear_usuario_test(usuario="turno_largo", rol="BIOQUIMICO")
+        self.client.post("/api/auth/login", json={"usuario": "turno_largo", "password": "ClaveSegura123!"})
+        sesion = self.db.query(Sesion).filter(Sesion.id_usuario == usuario.id_usuario).first()
+        token = create_access_token(
+            subject=usuario.id_usuario,
+            session_id=str(sesion.id_sesion),
+            role="BIOQUIMICO",
+            expires_delta=timedelta(hours=5),
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        for minutos in (55, 110, 165, 220):
+            set_simulated_time(t0 + timedelta(minutes=minutos))
+            response = self.client.post("/api/auth/heartbeat", json={"actividad": True}, headers=headers)
+            self.assertEqual(response.status_code, 200)
+
+        response_me = self.client.get("/api/auth/me", headers=headers)
+        self.assertEqual(response_me.status_code, 200)
+
     def test_t5_02_latido_sin_cuerpo_se_comporta_como_actividad_false(self) -> None:
         """2. Latido sin cuerpo se comporta como actividad=false."""
         self.crear_usuario_test(usuario="sin_cuerpo", password="PasswordSeguro123!")
@@ -338,9 +436,86 @@ class TestCicloVidaSesion(IntegrationTestCase):
         self.assertGreater(sesion.ultimo_latido, latido_inicial)
         self.assertEqual(sesion.ultima_actividad, actividad_inicial)
 
+    def test_t5_02b_modo_desarrollo_ignora_inactividad_pero_aplica_tope(self) -> None:
+        from app.core.security import create_access_token
+
+        settings.modo_produccion = False
+        usuario = self.crear_usuario_test(usuario="dev_sesion", rol="BIOQUIMICO")
+        self.client.post("/api/auth/login", json={"usuario": "dev_sesion", "password": "ClaveSegura123!"})
+        sesion = self.db.query(Sesion).filter(Sesion.id_usuario == usuario.id_usuario).first()
+        token = create_access_token(
+            subject=usuario.id_usuario,
+            session_id=str(sesion.id_sesion),
+            role="BIOQUIMICO",
+            expires_delta=timedelta(hours=25),
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        t0 = ahora()
+
+        set_simulated_time(t0 + timedelta(hours=6))
+        self.assertEqual(self.client.get("/api/auth/me", headers=headers).status_code, 200)
+
+        set_simulated_time(t0 + timedelta(hours=24))
+        response = self.client.get("/api/auth/me", headers=headers)
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["codigo"], "SESION_EXPIRADA")
+
+    def test_t5_02c_refresh_no_actualiza_actividad(self) -> None:
+        usuario = self.crear_usuario_test(usuario="refresh_idle", rol="BIOQUIMICO")
+        login = self.client.post("/api/auth/login", json={"usuario": "refresh_idle", "password": "ClaveSegura123!"})
+        sesion = self.db.query(Sesion).filter(Sesion.id_usuario == usuario.id_usuario).first()
+        actividad_inicial = sesion.ultima_actividad
+        cookie = login.cookies.get("refresh_token")
+        t0 = ahora()
+
+        set_simulated_time(t0 + timedelta(seconds=3599))
+        response = self.client.post(
+            "/api/auth/refresh",
+            cookies={"refresh_token": cookie},
+            headers={"X-LIS-Client": "web"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.db.refresh(sesion)
+        self.assertEqual(sesion.ultima_actividad, actividad_inicial)
+
+        set_simulated_time(t0 + timedelta(minutes=60))
+        response_expirado = self.client.post(
+            "/api/auth/refresh",
+            cookies={"refresh_token": cookie},
+            headers={"X-LIS-Client": "web"},
+        )
+        self.assertEqual(response_expirado.status_code, 401)
+        self.assertEqual(response_expirado.json()["codigo"], "SESION_EXPIRADA")
+
+    def test_t5_02d_access_expirado_se_renueva_mientras_sesion_vigente(self) -> None:
+        settings.access_token_minutes = 1
+        usuario = self.crear_usuario_test(usuario="token_corto", rol="BIOQUIMICO")
+        login = self.client.post("/api/auth/login", json={"usuario": "token_corto", "password": "ClaveSegura123!"})
+        token_anterior = login.json()["access_token"]
+        cookie = login.cookies.get("refresh_token")
+
+        set_simulated_time(ahora() + timedelta(minutes=2))
+        response_expirado = self.client.get(
+            "/api/auth/me",
+            headers={"Authorization": f"Bearer {token_anterior}"},
+        )
+        self.assertEqual(response_expirado.status_code, 401)
+
+        renovacion = self.client.post(
+            "/api/auth/refresh",
+            cookies={"refresh_token": cookie},
+            headers={"X-LIS-Client": "web"},
+        )
+        self.assertEqual(renovacion.status_code, 200)
+        token_nuevo = renovacion.json()["access_token"]
+        response_vigente = self.client.get(
+            "/api/auth/me",
+            headers={"Authorization": f"Bearer {token_nuevo}"},
+        )
+        self.assertEqual(response_vigente.status_code, 200)
+
     def test_t5_03_cambiar_config_afecta_sesiones_ya_abiertas(self) -> None:
-        """3. Cambiar sesion_muerta_tras_seg y sesion_inactividad_min por la API cambia el comportamiento de sesiones ya abiertas."""
-        from app.services.sesion_config_service import invalidar_cache_config_sesion
+        """La API admin no puede modificar una política declarada por entorno."""
 
         self.crear_usuario_test(usuario="admin_cfg", password="PasswordSeguro123!", rol="ADMIN")
         login_admin = self.client.post("/api/auth/login", json={"usuario": "admin_cfg", "password": "PasswordSeguro123!"})
@@ -352,7 +527,6 @@ class TestCicloVidaSesion(IntegrationTestCase):
         token_user = login_user.json()["access_token"]
         h_user = {"Authorization": f"Bearer {token_user}"}
 
-        # Cambiar configuración por API: muerta tras 60 s (en lugar de 150), inactividad 10 min (en lugar de 30)
         r_put = self.client.put(
             "/api/admin/configuracion/sesion",
             json={
@@ -363,84 +537,44 @@ class TestCicloVidaSesion(IntegrationTestCase):
             },
             headers=h_admin,
         )
-        self.assertEqual(r_put.status_code, 200)
-        invalidar_cache_config_sesion()
-
-        # Avanzar tiempo 65 segundos sin latido para la sesión del usuario (65 > 60 s)
-        set_simulated_time(ahora() + timedelta(seconds=65))
-
-        r_check = self.client.get("/api/auth/me", headers=h_user)
-        self.assertEqual(r_check.status_code, 401)
-        self.assertEqual(r_check.json()["codigo"], "SESION_EXPIRADA")
+        self.assertEqual(r_put.status_code, 409)
+        self.assertEqual(r_put.json()["codigo"], "CONFLICTO")
+        self.assertEqual(self.client.get("/api/auth/me", headers=h_user).status_code, 200)
 
     def test_t5_04_tope_absoluto_nuevo_se_aplica_a_sesiones_posteriores(self) -> None:
-        """4. El tope absoluto nuevo se aplica a sesiones creadas después del cambio, no a las existentes."""
-        from app.services.sesion_config_service import invalidar_cache_config_sesion
-
-        self.crear_usuario_test(usuario="admin_tope", password="PasswordSeguro123!", rol="ADMIN")
-        login_admin = self.client.post("/api/auth/login", json={"usuario": "admin_tope", "password": "PasswordSeguro123!"})
-        token_admin = login_admin.json()["access_token"]
-        h_admin = {"Authorization": f"Bearer {token_admin}"}
-
-        # Sesión A creada con tope inicial de 12 horas
+        """El tope absoluto configurado se fija al crear cada sesión."""
         self.crear_usuario_test(usuario="user_a", password="PasswordSeguro123!")
         login_a = self.client.post("/api/auth/login", json={"usuario": "user_a", "password": "PasswordSeguro123!"})
         sesion_a = self.db.query(Sesion).filter(Sesion.id_usuario == login_a.json()["usuario"]["id_usuario"]).first()
         expira_a = sesion_a.expira_en
 
-        # Cambiar tope a 4 horas por la API
-        r_put = self.client.put(
+        settings.session_absolute_timeout_hours = 4
+        self.crear_usuario_test(usuario="user_b", password="PasswordSeguro123!")
+        login_b = self.client.post("/api/auth/login", json={"usuario": "user_b", "password": "PasswordSeguro123!"})
+        sesion_b = self.db.query(Sesion).filter(Sesion.id_usuario == login_b.json()["usuario"]["id_usuario"]).first()
+        esperado_b = ahora() + timedelta(hours=4)
+        self.db.refresh(sesion_a)
+        self.assertEqual(sesion_a.expira_en, expira_a)
+        self.assertAlmostEqual(sesion_b.expira_en.timestamp(), esperado_b.timestamp(), delta=2)
+
+    def test_t5_05_validaciones_de_rango_configuracion_sesion(self) -> None:
+        """La antigua ruta de escritura rechaza cualquier política administrada por base de datos."""
+        self.crear_usuario_test(usuario="admin_rangos", password="PasswordSeguro123!", rol="ADMIN")
+        login_admin = self.client.post("/api/auth/login", json={"usuario": "admin_rangos", "password": "PasswordSeguro123!"})
+        h_admin = {"Authorization": f"Bearer {login_admin.json()['access_token']}"}
+
+        response = self.client.put(
             "/api/admin/configuracion/sesion",
             json={
                 "sesion_intervalo_latido_seg": 30,
                 "sesion_muerta_tras_seg": 150,
                 "sesion_inactividad_min": 30,
-                "sesion_tope_absoluto_horas": 4,
+                "sesion_tope_absoluto_horas": 12,
             },
             headers=h_admin,
         )
-        self.assertEqual(r_put.status_code, 200)
-        invalidar_cache_config_sesion()
-
-        # Sesión A conserva su expira_en de 12h
-        self.db.refresh(sesion_a)
-        self.assertEqual(sesion_a.expira_en, expira_a)
-
-        # Sesión B creada después del cambio -> expira_en debe ser ahora + 4h
-        self.crear_usuario_test(usuario="user_b", password="PasswordSeguro123!")
-        login_b = self.client.post("/api/auth/login", json={"usuario": "user_b", "password": "PasswordSeguro123!"})
-        sesion_b = self.db.query(Sesion).filter(Sesion.id_usuario == login_b.json()["usuario"]["id_usuario"]).first()
-        esperado_b = ahora() + timedelta(hours=4)
-        self.assertAlmostEqual(sesion_b.expira_en.timestamp(), esperado_b.timestamp(), delta=2)
-
-    def test_t5_05_validaciones_de_rango_configuracion_sesion(self) -> None:
-        """5. Rangos: intervalo 9 y 121 → 400; muerta < 3× intervalo → 400; inactividad 4 y 481 → 400; tope 0 y 25 → 400."""
-        self.crear_usuario_test(usuario="admin_rangos", password="PasswordSeguro123!", rol="ADMIN")
-        login_admin = self.client.post("/api/auth/login", json={"usuario": "admin_rangos", "password": "PasswordSeguro123!"})
-        h_admin = {"Authorization": f"Bearer {login_admin.json()['access_token']}"}
-
-        base_valida = {
-            "sesion_intervalo_latido_seg": 30,
-            "sesion_muerta_tras_seg": 150,
-            "sesion_inactividad_min": 30,
-            "sesion_tope_absoluto_horas": 12,
-        }
-
-        casos_invalidos = [
-            ({"sesion_intervalo_latido_seg": 9}, "intervalo 9 < 10"),
-            ({"sesion_intervalo_latido_seg": 121}, "intervalo 121 > 120"),
-            ({"sesion_intervalo_latido_seg": 30, "sesion_muerta_tras_seg": 89}, "muerta 89 < 3*30"),
-            ({"sesion_inactividad_min": 4}, "inactividad 4 < 5"),
-            ({"sesion_inactividad_min": 481}, "inactividad 481 > 480"),
-            ({"sesion_tope_absoluto_horas": 0}, "tope 0 < 1"),
-            ({"sesion_tope_absoluto_horas": 25}, "tope 25 > 24"),
-        ]
-
-        for modif, descripcion in casos_invalidos:
-            payload = {**base_valida, **modif}
-            r = self.client.put("/api/admin/configuracion/sesion", json=payload, headers=h_admin)
-            self.assertEqual(r.status_code, 400, f"Fallo al validar: {descripcion}")
-            self.assertEqual(r.json()["codigo"], "VALIDACION", f"Código incorrecto para: {descripcion}")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["codigo"], "CONFLICTO")
 
     def test_t5_06_control_de_acceso_roles_y_autenticacion(self) -> None:
         """6. BIOQUIMICO → 403 en ambos endpoints; sin token → 401."""
@@ -471,12 +605,7 @@ class TestCicloVidaSesion(IntegrationTestCase):
         self.assertEqual(r_put_bio.json()["codigo"], "PROHIBIDO")
 
     def test_t5_07_put_registra_evento_y_usa_settings_si_falta_en_bd(self) -> None:
-        """7. El PUT registra CONFIG_SESION_EDITADA con antes/después; clave ausente en BD → usa settings."""
-        from app.models.result import LaboratorioConfig
-
-        # Eliminar una clave de la BD para comprobar que 'antes' toma el valor de settings
-        self.db.query(LaboratorioConfig).filter(LaboratorioConfig.clave == "sesion_intervalo_latido_seg").delete()
-        self.db.commit()
+        """La lectura administrativa refleja el entorno y la escritura no crea auditoría de cambios."""
 
         self.crear_usuario_test(usuario="admin_auditor", password="PasswordSeguro123!", rol="ADMIN")
         login_admin = self.client.post("/api/auth/login", json={"usuario": "admin_auditor", "password": "PasswordSeguro123!"})
@@ -492,22 +621,14 @@ class TestCicloVidaSesion(IntegrationTestCase):
             },
             headers=h_admin,
         )
-        self.assertEqual(r_put.status_code, 200)
+        self.assertEqual(r_put.status_code, 409)
+        self.assertIsNone(self.db.query(LogSeguridad).filter(LogSeguridad.accion == "CONFIG_SESION_EDITADA").first())
 
-        # Verificar que se registró CONFIG_SESION_EDITADA
-        evento = (
-            self.db.query(LogSeguridad)
-            .filter(LogSeguridad.accion == "CONFIG_SESION_EDITADA")
-            .order_by(LogSeguridad.id_log.desc())
-            .first()
-        )
-        self.assertIsNotNone(evento)
-        detalle = evento.detalle
-        self.assertIn("sesion_intervalo_latido_seg", detalle)
-        # La clave que faltaba en BD tomó antes = 30 (settings) y despues = 45
-        self.assertEqual(detalle["sesion_intervalo_latido_seg"]["antes"], 30)
-        self.assertEqual(detalle["sesion_intervalo_latido_seg"]["despues"], 45)
-        self.assertEqual(detalle["sesion_tope_absoluto_horas"]["despues"], 8)
+        r_get = self.client.get("/api/admin/configuracion/sesion", headers=h_admin)
+        self.assertEqual(r_get.status_code, 200)
+        self.assertEqual(r_get.json()["modo_produccion"], True)
+        self.assertEqual(r_get.json()["inactividad_min"], 60)
+        self.assertEqual(r_get.json()["tope_absoluto_horas"], 24)
 
     def test_t5_08_login_refresh_devuelven_config_y_heartbeat_segundos_restantes(self) -> None:
         """8. login/refresh devuelven config_sesion; el heartbeat devuelve segundos_restantes_inactividad coherente."""
@@ -546,8 +667,8 @@ class TestCicloVidaSesion(IntegrationTestCase):
         data_beat = r_beat.json()
         self.assertIn("intervalo_latido_seg", data_beat)
         self.assertIn("segundos_restantes_inactividad", data_beat)
-        # Inactividad total = 30 min (1800 s); tras 5 min (300 s) sin actividad, deben quedar ~1500 s
-        self.assertAlmostEqual(data_beat["segundos_restantes_inactividad"], 1500, delta=5)
+        # Límite configurado = 60 min; tras 5 min sin actividad deben quedar ~3300 s.
+        self.assertAlmostEqual(data_beat["segundos_restantes_inactividad"], 3300, delta=5)
 
     def test_t5_09_contrato_latido_y_compatibilidad(self) -> None:
         """9. Los tests de sesión previos (10–13 y 14 de Fase 1) se actualizan al nuevo contrato del latido y siguen cubriendo lo mismo."""

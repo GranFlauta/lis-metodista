@@ -23,7 +23,9 @@ from app.core.database import get_db
 from app.core.errors import NoEncontradoError, ProhibidoError
 from app.models.report import Informe, InformeEvento
 from app.models.user import Usuario
-from app.reports.pdf import generar_informe_pdf
+from app.reports.pdf import generar_informe_pdf, generar_paginas_informe
+from app.reports.presentation import estudios_para_informe
+from app.schemas.resultado import VistaPreviaResponse
 from app.schemas.informe import (
     InformeDetalleResponse,
     InformeEventoResponse,
@@ -45,6 +47,52 @@ from app.services.informes_service import (
 router = APIRouter(prefix="/api/informes", tags=["Informes"])
 
 
+def _documento_informe(informe: Informe) -> dict[str, Any]:
+    """Proyecta el snapshot sin modificarlo ni sustituir al responsable original."""
+    snapshot = informe.snapshot_json
+    paciente = snapshot.get("paciente") or {}
+    orden = dict(snapshot.get("orden") or {})
+    if not orden.get("creado_en") and informe.orden and informe.orden.creado_en:
+        orden["creado_en"] = informe.orden.creado_en.isoformat()
+    firmante = snapshot.get("firmante") or {}
+    paciente_nombre = " ".join(filter(None, [paciente.get("nombres"), paciente.get("apellido_paterno"), paciente.get("apellido_materno")]))
+    edad = f"{paciente['edad_anios']} años" if paciente.get("edad_anios") is not None else (f"{paciente['edad_meses']} meses" if paciente.get("edad_meses") else "")
+    firmado_nombre = " ".join(filter(None, [firmante.get("nombres"), firmante.get("apellido_paterno"), firmante.get("apellido_materno")]))
+    return {
+        "aprobado": True,
+        "folio": informe.folio,
+        "numero_orden": orden.get("numero_orden_paciente"),
+        "numero_version": informe.numero_version,
+        "publicado_en": informe.publicado_en.isoformat(),
+        "snapshot_sha256": informe.snapshot_sha256,
+        "separador_decimal": snapshot.get("separador_decimal", ","),
+        "paciente": {
+            "nombre_completo": paciente_nombre,
+            "ci": paciente.get("ci"),
+            "sexo_texto": "Masculino" if paciente.get("sexo") == "M" else "Femenino" if paciente.get("sexo") == "F" else "—",
+            "edad": edad,
+        },
+        "orden": orden,
+        "firmante": {"nombre_completo": firmado_nombre, "matricula": firmante.get("matricula_profesional")},
+        "estudios": snapshot.get("estudios") or [],
+    }
+
+
+@router.get("/{folio}/vista-previa", response_model=VistaPreviaResponse, summary="Consulta de pantalla del informe oficial")
+def vista_previa_informe(
+    folio: str,
+    response: Response,
+    version: Optional[int] = Query(None, ge=1, le=3),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(require_auth),
+) -> dict[str, Any]:
+    """Permite consultar versiones y restaurados sin habilitar PDF ni impresión."""
+    informe = obtener_informe_por_folio(db, folio, numero_version=version)
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return generar_paginas_informe(_documento_informe(informe))
+
+
 @router.get("/{folio}/pdf", response_class=Response, summary="Descargar o abrir PDF oficial")
 def descargar_pdf_informe(
     folio: str,
@@ -58,30 +106,7 @@ def descargar_pdf_informe(
     informe = obtener_informe_por_folio(db, folio, numero_version=version)
     if informe.estado != "VIGENTE":
         raise ProhibidoError("Solo se puede descargar o imprimir la versión vigente del informe.")
-    snapshot = informe.snapshot_json
-    paciente = snapshot.get("paciente") or {}
-    orden = snapshot.get("orden") or {}
-    firmante = snapshot.get("firmante") or {}
-    paciente_nombre = " ".join(filter(None, [paciente.get("nombres"), paciente.get("apellido_paterno"), paciente.get("apellido_materno")]))
-    edad = f"{paciente['edad_anios']} años" if paciente.get("edad_anios") is not None else (f"{paciente['edad_meses']} meses" if paciente.get("edad_meses") else "")
-    firmado_nombre = " ".join(filter(None, [firmante.get("nombres"), firmante.get("apellido_paterno"), firmante.get("apellido_materno")]))
-    documento = {
-        "aprobado": True,
-        "folio": informe.folio,
-        "numero_orden": orden.get("numero_orden_paciente"),
-        "numero_version": informe.numero_version,
-        "publicado_en": informe.publicado_en.isoformat(),
-        "snapshot_sha256": informe.snapshot_sha256,
-        "paciente": {
-            "nombre_completo": paciente_nombre,
-            "ci": paciente.get("ci"),
-            "sexo_texto": "Masculino" if paciente.get("sexo") == "M" else "Femenino" if paciente.get("sexo") == "F" else "—",
-            "edad": edad,
-        },
-        "orden": orden,
-        "firmante": {"nombre_completo": firmado_nombre, "matricula": firmante.get("matricula_profesional")},
-        "estudios": snapshot.get("estudios") or [],
-    }
+    documento = _documento_informe(informe)
     pdf = generar_informe_pdf(documento)
     db.add(InformeEvento(
         folio=informe.folio,
@@ -221,6 +246,7 @@ def obtener_informe_endpoint(
         "justificativo": informe.justificativo,
         "publicado_en": informe.publicado_en,
         "snapshot_json": informe.snapshot_json,
+        "estudios_informe": estudios_para_informe(informe.snapshot_json.get("estudios") or []),
         "snapshot_sha256": informe.snapshot_sha256,
         "firmante": {
             "id_usuario": firm.id_usuario,

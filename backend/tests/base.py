@@ -32,7 +32,6 @@ from app.models.result import ResultadoBorrador
 from app.models.patient import Paciente
 from app.models.session import LogSeguridad, Sesion
 from app.models.user import Rol, Usuario
-from app.services.sesion_config_service import invalidar_cache_config_sesion
 
 
 def validar_database_url_test(url: str | None) -> str:
@@ -157,24 +156,6 @@ class IntegrationTestCase(unittest.TestCase):
                     "Ejecute 'scripts/crear_bd_test.sh' para aplicar 001_schema.sql en la BD de pruebas."
                 )
 
-            # Verificar las 4 claves de configuración de sesión (D35-02 / T4)
-            claves_sesion_requeridas = {
-                "sesion_intervalo_latido_seg",
-                "sesion_muerta_tras_seg",
-                "sesion_inactividad_min",
-                "sesion_tope_absoluto_horas",
-            }
-            res_cfg = conn.execute(text(
-                "SELECT clave FROM laboratorio.laboratorio_config WHERE clave LIKE 'sesion_%'"
-            ))
-            claves_existentes = {row[0] for row in res_cfg}
-            claves_faltantes = claves_sesion_requeridas - claves_existentes
-            if claves_faltantes:
-                raise AssertionError(
-                    f"Faltan claves de configuración de sesión en 'laboratorio_config': {sorted(claves_faltantes)}. "
-                    "Ejecute 'alembic upgrade head' en la BD de pruebas (migración 0002_config_sesion)."
-                )
-
         # 4. Sembrar roles básicos si no existen
         with session_factory() as session:
             admin_rol = session.query(Rol).filter(Rol.nombre == "ADMIN").first()
@@ -209,19 +190,6 @@ class IntegrationTestCase(unittest.TestCase):
         self.db.query(Sesion).delete()
         self.db.query(Usuario).delete()
 
-        # Resetear configuración de sesión por defecto y su caché (D35-02 / T4 / T5)
-        self.db.execute(text("""
-            INSERT INTO laboratorio.laboratorio_config (clave, valor)
-            VALUES 
-                ('sesion_intervalo_latido_seg', '30'),
-                ('sesion_muerta_tras_seg', '150'),
-                ('sesion_inactividad_min', '30'),
-                ('sesion_tope_absoluto_horas', '12')
-            ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor
-        """))
-        self.db.commit()
-        invalidar_cache_config_sesion()
-
         def override_get_db() -> Generator[Session, None, None]:
             db_session = session_factory()
             try:
@@ -233,7 +201,6 @@ class IntegrationTestCase(unittest.TestCase):
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
-        invalidar_cache_config_sesion()
         self.db.close()
         app.dependency_overrides.clear()
         reset_clock()

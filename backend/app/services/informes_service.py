@@ -21,8 +21,10 @@ from app.core.errors import (
 from app.models.catalog import Parametro
 from app.models.order import Orden
 from app.models.report import Folio, Informe, InformeEvento, Delegacion
+from app.models.result import LaboratorioConfig
 from app.models.user import Usuario
 from app.services.evaluacion_service import evaluar_captura_orden
+from app.reports.presentation import estudios_para_informe
 
 
 def calcular_hash_snapshot(snapshot: dict[str, Any]) -> str:
@@ -40,7 +42,7 @@ def publicar_orden(
     """
     Publica una orden completada con folio oficial secuencial inmutable.
     - Valida permisos (autor, colaborador delegado o urgencia justificada).
-    - Valida obligatoriedad de observaciones finales.
+    - Las observaciones finales son opcionales; no se inventan textos para publicar.
     - Valida que no queden valores por defecto sin confirmar ni pendientes.
     - Reserva folio atómicamente con `siguiente_folio()`.
     - Congela snapshot JSON inmutable y registra evento append-only PUBLICACION / URGENCIA.
@@ -87,10 +89,6 @@ def publicar_orden(
     if not orden.estudios or len(orden.estudios) == 0:
         raise ValidacionError("La orden no tiene estudios a realizar.")
 
-    # 3. Observaciones finales de la orden son obligatorias para publicar (PLAN_DE_ACCION_Y_DIAGNOSTICO.md §1.2 B.5 y §3)
-    if not orden.observaciones or not orden.observaciones.strip():
-        raise ValidacionError("Las observaciones finales del informe son obligatorias para publicar el documento oficial.")
-
     # 4. Construir y validar captura de resultados
     captura = evaluar_captura_orden(orden)
     completitud = captura["completitud"]
@@ -106,15 +104,20 @@ def publicar_orden(
     if completitud["errores"]:
         nombres_err = ", ".join(completitud["errores"])
         raise ValidacionError(f"Existen errores de validación en los resultados: {nombres_err}.")
+    estudios_publicados = estudios_para_informe(captura["estudios"])
+    if not completitud["completo"] or not estudios_publicados:
+        raise ValidacionError("Registre al menos un resultado antes de publicar el informe.")
 
     # 5. Generar Snapshot inmutable
     now = ahora()
     paciente = orden.paciente
     firmante = orden.autor
     publicador = current_user
+    config_decimal = db.query(LaboratorioConfig).filter(LaboratorioConfig.clave == "separador_decimal").first()
 
     snapshot: dict[str, Any] = {
         "version_schema": 1,
+        "separador_decimal": config_decimal.valor if config_decimal else ",",
         "fecha_publicacion": now.isoformat(),
         "paciente": {
             "id_paciente": paciente.id_paciente,
@@ -131,6 +134,7 @@ def publicar_orden(
             "id_orden": orden.id_orden,
             "numero_orden_paciente": orden.numero_orden_paciente,
             "fecha_solicitud": orden.fecha_solicitud.isoformat() if orden.fecha_solicitud else None,
+            "creado_en": orden.creado_en.isoformat() if orden.creado_en else None,
             "fecha_hora_toma_muestra": orden.fecha_hora_toma_muestra.isoformat() if orden.fecha_hora_toma_muestra else None,
             "medico_solicitante": orden.medico_solicitante,
             "origen_solicitud": orden.origen_solicitud,
@@ -151,7 +155,7 @@ def publicar_orden(
             "nombres": publicador.nombres,
             "apellido_paterno": publicador.apellido_paterno,
         },
-        "estudios": captura["estudios"],
+        "estudios": estudios_publicados,
         "es_urgencia": es_urgencia,
         "justificativo": justificativo_urgencia.strip() if (es_urgencia and justificativo_urgencia) else None,
     }

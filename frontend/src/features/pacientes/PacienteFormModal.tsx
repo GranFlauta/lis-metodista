@@ -241,7 +241,7 @@ export const PacienteFormModal: React.FC<PacienteFormModalProps> = ({
           )}
 
           {/* Opción Sin CI */}
-          <div style={{ backgroundColor: "#f8fafc", padding: "0.75rem 1rem", borderRadius: "var(--radius)", border: "1px solid var(--border-color)" }}>
+          <div style={{ backgroundColor: "var(--bg-soft)", padding: "0.75rem 1rem", borderRadius: "var(--radius)", border: "1px solid var(--border-color)" }}>
             <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontWeight: 600 }}>
               <input
                 type="checkbox"
